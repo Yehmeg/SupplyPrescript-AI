@@ -1,0 +1,58 @@
+Column,Decision,Reason
+Type,CANDIDATE FEATURE,Potentially available at prediction time
+Days for shipping (real),REMOVE - LEAKAGE,Potentially reveals post-outcome information
+Days for shipment (scheduled),CANDIDATE FEATURE,Potentially available at prediction time
+Benefit per order,CANDIDATE FEATURE,Potentially available at prediction time
+Sales per customer,CANDIDATE FEATURE,Potentially available at prediction time
+Delivery Status,REMOVE - LEAKAGE,Potentially reveals post-outcome information
+Late_delivery_risk,TARGET,Prediction target
+Category Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Category Name,CANDIDATE FEATURE,Potentially available at prediction time
+Customer City,CANDIDATE FEATURE,Potentially available at prediction time
+Customer Country,CANDIDATE FEATURE,Potentially available at prediction time
+Customer Email,REMOVE - PII,Personally identifiable/sensitive information
+Customer Fname,REMOVE - PII,Personally identifiable/sensitive information
+Customer Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Customer Lname,REMOVE - PII,Personally identifiable/sensitive information
+Customer Password,REMOVE - PII,Personally identifiable/sensitive information
+Customer Segment,CANDIDATE FEATURE,Potentially available at prediction time
+Customer State,CANDIDATE FEATURE,Potentially available at prediction time
+Customer Street,REMOVE - PII,Personally identifiable/sensitive information
+Customer Zipcode,CANDIDATE FEATURE,Potentially available at prediction time
+Department Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Department Name,CANDIDATE FEATURE,Potentially available at prediction time
+Latitude,CANDIDATE FEATURE,Potentially available at prediction time
+Longitude,CANDIDATE FEATURE,Potentially available at prediction time
+Market,CANDIDATE FEATURE,Potentially available at prediction time
+Order City,CANDIDATE FEATURE,Potentially available at prediction time
+Order Country,CANDIDATE FEATURE,Potentially available at prediction time
+Order Customer Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+order date (DateOrders),CANDIDATE FEATURE,Potentially available at prediction time
+Order Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Order Item Cardprod Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Order Item Discount,CANDIDATE FEATURE,Potentially available at prediction time
+Order Item Discount Rate,CANDIDATE FEATURE,Potentially available at prediction time
+Order Item Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Order Item Product Price,CANDIDATE FEATURE,Potentially available at prediction time
+Order Item Profit Ratio,CANDIDATE FEATURE,Potentially available at prediction time
+Order Item Quantity,CANDIDATE FEATURE,Potentially available at prediction time
+Sales,CANDIDATE FEATURE,Potentially available at prediction time
+Order Item Total,CANDIDATE FEATURE,Potentially available at prediction time
+Order Profit Per Order,CANDIDATE FEATURE,Potentially available at prediction time
+Order Region,CANDIDATE FEATURE,Potentially available at prediction time
+Order State,CANDIDATE FEATURE,Potentially available at prediction time
+Order Status,CANDIDATE FEATURE,Potentially available at prediction time
+Order Zipcode,REMOVE - DATA QUALITY,Unavailable / overwhelmingly missing
+Product Card Id,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Product Category Id,CANDIDATE FEATURE,Potentially available at prediction time
+Product Description,REMOVE - DATA QUALITY,Unavailable / overwhelmingly missing
+Product Image,REMOVE - IDENTIFIER,Identifier or non-predictive field
+Product Name,CANDIDATE FEATURE,Potentially available at prediction time
+Product Price,CANDIDATE FEATURE,Potentially available at prediction time
+Product Status,REMOVE - IDENTIFIER,Identifier or non-predictive field
+shipping date (DateOrders),REMOVE - LEAKAGE,Potentially reveals post-outcome information
+Shipping Mode,CANDIDATE FEATURE,Potentially available at prediction time
+Order_Year,CANDIDATE FEATURE,Potentially available at prediction time
+Order_Month,CANDIDATE FEATURE,Potentially available at prediction time
+Order_DayOfWeek,CANDIDATE FEATURE,Potentially available at prediction time
+Order_Day,CANDIDATE FEATURE,Potentially available at prediction time
