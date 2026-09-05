@@ -1,0 +1,6 @@
+action_id,action_name,base_cost,risk_reduction,time_reduction_days,capacity_units,enabled
+A0,NO_ACTION,0,0.00,0.0,0,1
+A1,EXPEDITE,1800,0.35,2.0,1,1
+A2,PRIORITY_HANDLING,900,0.20,1.0,1,1
+A3,ALTERNATIVE_ROUTE,1400,0.28,1.5,1,1
+A4,ALTERNATIVE_HUB,2200,0.40,1.0,1,1
