@@ -1,0 +1,98 @@
+-- SupplyPrescript Database Schema
+-- Owner: M6 (Database & Operational Web Application Engineer)
+-- Covers: shipments, model predictions, recommendations, executed decisions, outcomes/ROI
+
+-- ============================================================
+-- 1. SHIPMENTS - the base entity everything else references
+-- ============================================================
+CREATE TABLE shipments (
+    shipment_id     SERIAL PRIMARY KEY,
+    origin          VARCHAR(120) NOT NULL,
+    destination     VARCHAR(120) NOT NULL,
+    carrier         VARCHAR(120),
+    product_type    VARCHAR(120),
+    quantity        NUMERIC,
+    scheduled_ship_date   TIMESTAMP,
+    scheduled_delivery_date TIMESTAMP,
+    created_at      TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ============================================================
+-- 2. PREDICTIONS - M4's model output for a given shipment
+-- ============================================================
+CREATE TABLE predictions (
+    prediction_id       SERIAL PRIMARY KEY,
+    shipment_id         INTEGER NOT NULL REFERENCES shipments(shipment_id) ON DELETE CASCADE,
+    risk_probability     NUMERIC(5,4) NOT NULL CHECK (risk_probability BETWEEN 0 AND 1),
+    predicted_class      VARCHAR(20) NOT NULL,       -- e.g. 'on_time' / 'delayed'
+    model_version         VARCHAR(50) NOT NULL,
+    eligibility_status    VARCHAR(30) NOT NULL DEFAULT 'eligible',
+    created_at           TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_predictions_shipment ON predictions(shipment_id);
+
+-- ============================================================
+-- 3. RECOMMENDATIONS - M5's optimizer output, tied to a prediction
+--    Up to 3 ranked feasible actions per prediction
+-- ============================================================
+CREATE TABLE recommendations (
+    recommendation_id    SERIAL PRIMARY KEY,
+    prediction_id        INTEGER NOT NULL REFERENCES predictions(prediction_id) ON DELETE CASCADE,
+    action_id             VARCHAR(50) NOT NULL,       -- e.g. 'expedite', 'secondary_supplier'
+    action_name           VARCHAR(120) NOT NULL,
+    predicted_cost        NUMERIC(12,2) NOT NULL,
+    predicted_time_days   NUMERIC(6,2) NOT NULL,
+    risk_score            NUMERIC(5,4),
+    feasible              BOOLEAN NOT NULL DEFAULT TRUE,
+    reason                TEXT,
+    rank                  SMALLINT,                   -- 1 = top recommendation
+    created_at            TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_recommendations_prediction ON recommendations(prediction_id);
+
+-- ============================================================
+-- 4. DECISIONS - the write-back when a user clicks "Execute Decision"
+-- ============================================================
+CREATE TABLE decisions (
+    decision_id           SERIAL PRIMARY KEY,
+    recommendation_id     INTEGER NOT NULL REFERENCES recommendations(recommendation_id),
+    shipment_id           INTEGER NOT NULL REFERENCES shipments(shipment_id),
+    executed_by            VARCHAR(120),
+    status                 VARCHAR(30) NOT NULL DEFAULT 'executed',  -- executed / reverted / failed
+    predicted_cost_at_exec NUMERIC(12,2) NOT NULL,
+    predicted_time_at_exec NUMERIC(6,2) NOT NULL,
+    executed_at             TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_decisions_shipment ON decisions(shipment_id);
+
+-- ============================================================
+-- 5. OUTCOMES - actual results, entered/simulated later, for ROI comparison
+-- ============================================================
+CREATE TABLE outcomes (
+    outcome_id        SERIAL PRIMARY KEY,
+    decision_id        INTEGER NOT NULL REFERENCES decisions(decision_id) ON DELETE CASCADE,
+    actual_cost         NUMERIC(12,2),
+    actual_time_days    NUMERIC(6,2),
+    actual_delayed      BOOLEAN,
+    recorded_at          TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_outcomes_decision ON outcomes(decision_id);
+
+-- ============================================================
+-- Convenience view: predicted vs actual + ROI, ready for the dashboard
+-- ============================================================
+CREATE VIEW decision_roi_view AS
+SELECT
+    d.decision_id,
+    d.shipment_id,
+    d.predicted_cost_at_exec,
+    o.actual_cost,
+    (d.predicted_cost_at_exec - o.actual_cost)               AS cost_savings,
+    d.predicted_time_at_exec,
+    o.actual_time_days,
+    (d.predicted_time_at_exec - o.actual_time_days)          AS time_savings_days,
+    o.actual_delayed,
+    d.executed_at,
+    o.recorded_at
+FROM decisions d
+LEFT JOIN outcomes o ON o.decision_id = d.decision_id;
