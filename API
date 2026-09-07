@@ -1,0 +1,99 @@
+"""
+FastAPI routes for the write-back / history / ROI side of SupplyPrescript.
+Prediction and recommendation-generation endpoints belong to M4/M5 — this file
+covers the endpoints M6 owns: execute, history, outcome, roi.
+"""
+from fastapi import FastAPI, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+import crud
+from models import Base
+
+DATABASE_URL = "postgresql://user:password@localhost:5432/supplyprescript"
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(bind=engine)
+
+app = FastAPI(title="SupplyPrescript - DB & Write-back API")
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ---------- request/response models ----------
+
+class ExecuteDecisionRequest(BaseModel):
+    recommendation_id: int
+    shipment_id: int
+    executed_by: str
+    predicted_cost_at_exec: float
+    predicted_time_at_exec: float
+
+
+class OutcomeRequest(BaseModel):
+    decision_id: int
+    actual_cost: float
+    actual_time_days: float
+    actual_delayed: bool
+
+
+# ---------- routes ----------
+
+@app.post("/decisions/execute")
+def execute_decision(payload: ExecuteDecisionRequest, db: Session = Depends(get_db)):
+    decision = crud.execute_decision(
+        db,
+        recommendation_id=payload.recommendation_id,
+        shipment_id=payload.shipment_id,
+        executed_by=payload.executed_by,
+        predicted_cost_at_exec=payload.predicted_cost_at_exec,
+        predicted_time_at_exec=payload.predicted_time_at_exec,
+    )
+    return {"decision_id": decision.decision_id, "status": decision.status}
+
+
+@app.get("/decisions/history")
+def decision_history(shipment_id: int | None = None, db: Session = Depends(get_db)):
+    decisions = crud.get_decision_history(db, shipment_id=shipment_id)
+    return [
+        {
+            "decision_id": d.decision_id,
+            "shipment_id": d.shipment_id,
+            "status": d.status,
+            "executed_at": d.executed_at,
+            "predicted_cost_at_exec": float(d.predicted_cost_at_exec),
+        }
+        for d in decisions
+    ]
+
+
+@app.post("/outcomes")
+def record_outcome(payload: OutcomeRequest, db: Session = Depends(get_db)):
+    outcome = crud.insert_outcome(
+        db,
+        decision_id=payload.decision_id,
+        actual_cost=payload.actual_cost,
+        actual_time_days=payload.actual_time_days,
+        actual_delayed=payload.actual_delayed,
+    )
+    return {"outcome_id": outcome.outcome_id}
+
+
+@app.get("/decisions/{decision_id}/roi")
+def decision_roi(decision_id: int, db: Session = Depends(get_db)):
+    roi = crud.get_decision_roi(db, decision_id)
+    if roi is None:
+        raise HTTPException(status_code=404, detail="Decision not found")
+    return roi
+
+
+@app.get("/roi")
+def all_roi(db: Session = Depends(get_db)):
+    return crud.get_all_roi(db)
