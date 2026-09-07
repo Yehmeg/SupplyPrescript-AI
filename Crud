@@ -1,0 +1,157 @@
+"""
+CRUD / data-access layer for SupplyPrescript.
+These are the functions M5's FastAPI endpoints call directly.
+Each function takes a SQLAlchemy `Session` as its first argument (standard FastAPI dependency pattern).
+"""
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+from models import Shipment, Prediction, Recommendation, Decision, Outcome
+
+
+# ---------------------------------------------------------------
+# INSERTS
+# ---------------------------------------------------------------
+
+def insert_shipment(db: Session, shipment_data: dict) -> Shipment:
+    """shipment_data: origin, destination, carrier, product_type, quantity,
+    scheduled_ship_date, scheduled_delivery_date"""
+    shipment = Shipment(**shipment_data)
+    db.add(shipment)
+    db.commit()
+    db.refresh(shipment)
+    return shipment
+
+
+def insert_prediction(db: Session, shipment_id: int, risk_probability: float,
+                       predicted_class: str, model_version: str,
+                       eligibility_status: str = "eligible") -> Prediction:
+    prediction = Prediction(
+        shipment_id=shipment_id,
+        risk_probability=risk_probability,
+        predicted_class=predicted_class,
+        model_version=model_version,
+        eligibility_status=eligibility_status,
+    )
+    db.add(prediction)
+    db.commit()
+    db.refresh(prediction)
+    return prediction
+
+
+def insert_recommendations(db: Session, prediction_id: int, recommendations: list[dict]) -> list[Recommendation]:
+    """recommendations: list of dicts, each with action_id, action_name, predicted_cost,
+    predicted_time_days, risk_score, feasible, reason, rank. Expects up to 3 items."""
+    rows = [Recommendation(prediction_id=prediction_id, **r) for r in recommendations]
+    db.add_all(rows)
+    db.commit()
+    for r in rows:
+        db.refresh(r)
+    return rows
+
+
+def execute_decision(db: Session, recommendation_id: int, shipment_id: int,
+                      executed_by: str, predicted_cost_at_exec: float,
+                      predicted_time_at_exec: float) -> Decision:
+    """Called when the user clicks 'Execute Decision' in the React app.
+    Write-back is transactional: either the row commits fully or not at all."""
+    decision = Decision(
+        recommendation_id=recommendation_id,
+        shipment_id=shipment_id,
+        executed_by=executed_by,
+        status="executed",
+        predicted_cost_at_exec=predicted_cost_at_exec,
+        predicted_time_at_exec=predicted_time_at_exec,
+    )
+    try:
+        db.add(decision)
+        db.commit()
+        db.refresh(decision)
+        return decision
+    except Exception:
+        db.rollback()
+        raise
+
+
+def insert_outcome(db: Session, decision_id: int, actual_cost: float,
+                    actual_time_days: float, actual_delayed: bool) -> Outcome:
+    """Called later (manually or via a simulation script) once the real outcome is known."""
+    outcome = Outcome(
+        decision_id=decision_id,
+        actual_cost=actual_cost,
+        actual_time_days=actual_time_days,
+        actual_delayed=actual_delayed,
+    )
+    db.add(outcome)
+    db.commit()
+    db.refresh(outcome)
+    return outcome
+
+
+# ---------------------------------------------------------------
+# RETRIEVALS
+# ---------------------------------------------------------------
+
+def get_shipment(db: Session, shipment_id: int) -> Shipment | None:
+    return db.get(Shipment, shipment_id)
+
+
+def get_latest_prediction(db: Session, shipment_id: int) -> Prediction | None:
+    stmt = (
+        select(Prediction)
+        .where(Prediction.shipment_id == shipment_id)
+        .order_by(Prediction.created_at.desc())
+        .limit(1)
+    )
+    return db.execute(stmt).scalar_one_or_none()
+
+
+def get_recommendations_for_prediction(db: Session, prediction_id: int) -> list[Recommendation]:
+    stmt = (
+        select(Recommendation)
+        .where(Recommendation.prediction_id == prediction_id)
+        .order_by(Recommendation.rank.asc())
+    )
+    return list(db.execute(stmt).scalars())
+
+
+def get_decision_history(db: Session, shipment_id: int | None = None) -> list[Decision]:
+    """If shipment_id is None, returns full history across all shipments (for the history page)."""
+    stmt = select(Decision).order_by(Decision.executed_at.desc())
+    if shipment_id is not None:
+        stmt = stmt.where(Decision.shipment_id == shipment_id)
+    return list(db.execute(stmt).scalars())
+
+
+def get_decision_roi(db: Session, decision_id: int) -> dict | None:
+    """Predicted-vs-actual comparison for one decision, for the ROI view."""
+    decision = db.get(Decision, decision_id)
+    if decision is None:
+        return None
+    outcome = decision.outcome
+    if outcome is None:
+        return {"decision_id": decision_id, "status": "outcome_pending"}
+    return {
+        "decision_id": decision_id,
+        "shipment_id": decision.shipment_id,
+        "predicted_cost": float(decision.predicted_cost_at_exec),
+        "actual_cost": float(outcome.actual_cost) if outcome.actual_cost is not None else None,
+        "cost_savings": (
+            float(decision.predicted_cost_at_exec - outcome.actual_cost)
+            if outcome.actual_cost is not None else None
+        ),
+        "predicted_time_days": float(decision.predicted_time_at_exec),
+        "actual_time_days": float(outcome.actual_time_days) if outcome.actual_time_days is not None else None,
+        "actual_delayed": outcome.actual_delayed,
+    }
+
+
+def get_all_roi(db: Session) -> list[dict]:
+    """Every decision with a recorded outcome — powers the ROI/history dashboard."""
+    stmt = select(Decision)
+    decisions = db.execute(stmt).scalars()
+    results = []
+    for d in decisions:
+        roi = get_decision_roi(db, d.decision_id)
+        if roi:
+            results.append(roi)
+    return results
