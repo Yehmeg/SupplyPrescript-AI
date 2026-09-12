@@ -422,6 +422,146 @@ class OptimizationRecommendation(Base):
         "OptimizationRun",
         back_populates="recommendations",
     )
+
+class RecommendationDecision(Base):
+    __tablename__ = "recommendation_decisions"
+
+    __table_args__ = (
+        CheckConstraint(
+            "decision_status IN ('ACCEPTED', 'REJECTED')",
+            name="ck_recommendation_decisions_status",
+        ),
+        CheckConstraint(
+            "execution_status IN "
+            "('PENDING', 'EXECUTED', 'FAILED', "
+            "'CANCELLED', 'NOT_APPLICABLE')",
+            name="ck_recommendation_decisions_execution_status",
+        ),
+    )
+
+    decision_id = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    recommendation_id = Column(
+        BigInteger,
+        ForeignKey(
+            "optimization_recommendations.recommendation_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        unique=True,
+    )
+
+    decision_status = Column(
+        String(20),
+        nullable=False,
+    )
+
+    execution_status = Column(
+        String(30),
+        nullable=False,
+        server_default=text("'PENDING'"),
+    )
+
+    decided_by = Column(
+        String(100),
+        nullable=True,
+    )
+
+    decision_note = Column(
+        Text,
+        nullable=True,
+    )
+
+    decided_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    executed_at = Column(
+        DateTime,
+        nullable=True,
+    )
+
+
+class OptimizationOutcome(Base):
+    __tablename__ = "optimization_outcomes"
+
+    __table_args__ = (
+        CheckConstraint(
+            "actual_intervention_cost >= 0",
+            name="ck_optimization_outcomes_intervention_cost",
+        ),
+        CheckConstraint(
+            "actual_time_days >= 0",
+            name="ck_optimization_outcomes_time_days",
+        ),
+        CheckConstraint(
+            "actual_delay_cost >= 0",
+            name="ck_optimization_outcomes_delay_cost",
+        ),
+        CheckConstraint(
+            "actual_total_cost >= 0",
+            name="ck_optimization_outcomes_total_cost",
+        ),
+    )
+
+    outcome_id = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    decision_id = Column(
+        BigInteger,
+        ForeignKey(
+            "recommendation_decisions.decision_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        unique=True,
+    )
+
+    actual_intervention_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    actual_time_days = Column(
+        Numeric(10, 4),
+        nullable=False,
+    )
+
+    actual_delayed = Column(
+        Boolean,
+        nullable=False,
+    )
+
+    actual_delay_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+        server_default=text("0"),
+    )
+
+    actual_total_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    outcome_note = Column(
+        Text,
+        nullable=True,
+    )
+
+    recorded_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
 Index(
     "idx_ml_predictions_order",
     MLPrediction.order_id,
@@ -445,4 +585,24 @@ Index(
 Index(
     "idx_optimization_runs_created_at",
     OptimizationRun.created_at,
+)
+
+Index(
+    "idx_recommendation_decisions_recommendation",
+    RecommendationDecision.recommendation_id,
+)
+
+Index(
+    "idx_recommendation_decisions_decided_at",
+    RecommendationDecision.decided_at,
+)
+
+Index(
+    "idx_optimization_outcomes_decision",
+    OptimizationOutcome.decision_id,
+)
+
+Index(
+    "idx_optimization_outcomes_recorded_at",
+    OptimizationOutcome.recorded_at,
 )

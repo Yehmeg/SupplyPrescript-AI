@@ -42,6 +42,11 @@ from app.api.schemas.database import (
     OptimizationRecommendationDBResponse,
     OptimizationRunWithRecommendationsResponse,
 )
+
+from app.api.schemas.decision import (
+    RecommendationDecisionRequest,
+    RecommendationDecisionResponse,
+)
 # ============================================================
 # APPLICATION LIFESPAN
 # ============================================================
@@ -609,6 +614,82 @@ def create_app() -> FastAPI:
             "run": run,
             "recommendations": recommendations,
         }
+    # ========================================================
+    # RECOMMENDATION DECISION
+    # ========================================================
+
+    @app.post(
+        f"{settings.API_PREFIX}/recommendations/"
+        "{recommendation_id}/decision",
+        response_model=RecommendationDecisionResponse,
+        tags=["closed-loop"],
+    )
+    def create_recommendation_decision(
+        recommendation_id: int,
+        payload: RecommendationDecisionRequest,
+        db: Session = Depends(get_db),
+    ):
+        # Recommendation must exist.
+        recommendation = crud.get_recommendation(
+            db,
+            recommendation_id,
+        )
+
+        if recommendation is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Recommendation not found",
+            )
+
+        # Only one decision is allowed per recommendation.
+        existing_decision = (
+            crud.get_decision_for_recommendation(
+                db,
+                recommendation_id,
+            )
+        )
+
+        if existing_decision is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "A decision already exists "
+                    "for this recommendation"
+                ),
+            )
+
+        try:
+            decision = (
+                crud.insert_recommendation_decision(
+                    db,
+                    recommendation_id=(
+                        recommendation_id
+                    ),
+                    decision_status=(
+                        payload.decision_status
+                    ),
+                    decided_by=(
+                        payload.decided_by
+                    ),
+                    decision_note=(
+                        payload.decision_note
+                    ),
+                )
+            )
+
+            return decision
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Failed to create decision: "
+                    f"{str(e)}"
+                ),
+            )
     @app.post(
         f"{settings.API_PREFIX}/optimize",
         response_model=OptimizeResponse,
@@ -765,6 +846,84 @@ def create_app() -> FastAPI:
                 recommendation_ids
             ),
         )
+
+    # ========================================================
+    # EXECUTE ACCEPTED DECISION
+    # ========================================================
+
+    @app.post(
+        f"{settings.API_PREFIX}/decisions/"
+        "{decision_id}/execute",
+        response_model=RecommendationDecisionResponse,
+        tags=["closed-loop"],
+    )
+    def execute_recommendation_decision(
+        decision_id: int,
+        db: Session = Depends(get_db),
+    ):
+        decision = crud.get_decision(
+            db,
+            decision_id,
+        )
+
+        if decision is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Decision not found",
+            )
+
+        if decision.decision_status != "ACCEPTED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Rejected recommendation "
+                    "cannot be executed"
+                ),
+            )
+
+        if decision.execution_status == "EXECUTED":
+            raise HTTPException(
+                status_code=409,
+                detail="Decision already executed",
+            )
+
+        if decision.execution_status != "PENDING":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Decision cannot be executed "
+                    f"from status "
+                    f"{decision.execution_status}"
+                ),
+            )
+
+        try:
+            executed_decision = (
+                crud.mark_decision_executed(
+                    db,
+                    decision_id,
+                )
+            )
+
+            if executed_decision is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Decision not found",
+                )
+
+            return executed_decision
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Failed to execute decision: "
+                    f"{str(e)}"
+                ),
+            )
 
     # ========================================================
     # GLOBAL VALUE ERROR HANDLER

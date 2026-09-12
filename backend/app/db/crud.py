@@ -7,7 +7,10 @@ from app.db.models import (
     OptimizationRecommendation,
     OptimizationRun,
     Order,
+    RecommendationDecision,
 )
+
+from sqlalchemy import func
 
 
 # Maps the ML/API feature names to Python ORM attribute names.
@@ -290,3 +293,85 @@ def get_recommendations_for_run(
         )
         .all()
     )
+
+def get_decision_for_recommendation(
+    db: Session,
+    recommendation_id: int,
+) -> Optional[RecommendationDecision]:
+
+    return (
+        db.query(RecommendationDecision)
+        .filter(
+            RecommendationDecision.recommendation_id
+            == recommendation_id
+        )
+        .first()
+    )
+
+
+def get_decision(
+    db: Session,
+    decision_id: int,
+) -> Optional[RecommendationDecision]:
+
+    return (
+        db.query(RecommendationDecision)
+        .filter(
+            RecommendationDecision.decision_id
+            == decision_id
+        )
+        .first()
+    )
+
+
+def insert_recommendation_decision(
+    db: Session,
+    *,
+    recommendation_id: int,
+    decision_status: str,
+    decided_by: Optional[str] = None,
+    decision_note: Optional[str] = None,
+) -> RecommendationDecision:
+
+    # Accepted recommendations wait for execution.
+    # Rejected recommendations will never be executed.
+    execution_status = (
+        "PENDING"
+        if decision_status == "ACCEPTED"
+        else "NOT_APPLICABLE"
+    )
+
+    decision = RecommendationDecision(
+        recommendation_id=recommendation_id,
+        decision_status=decision_status,
+        execution_status=execution_status,
+        decided_by=decided_by,
+        decision_note=decision_note,
+    )
+
+    db.add(decision)
+    db.commit()
+    db.refresh(decision)
+
+    return decision
+
+def mark_decision_executed(
+    db: Session,
+    decision_id: int,
+) -> Optional[RecommendationDecision]:
+
+    decision = get_decision(
+        db,
+        decision_id,
+    )
+
+    if decision is None:
+        return None
+
+    decision.execution_status = "EXECUTED"
+    decision.executed_at = func.now()
+
+    db.commit()
+    db.refresh(decision)
+
+    return decision
