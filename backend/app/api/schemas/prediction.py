@@ -62,3 +62,24 @@ class PredictResponse(BaseModel):
 
     # Populated only when shipment_ids are supplied
     prediction_ids: Optional[List[Optional[int]]] = None
+
+class PersistedPredictRequest(BaseModel):
+    orders: List[OrderInput]
+    request_id: Optional[str] = None
+
+
+class PersistedPredictionItem(BaseModel):
+    order_id: int
+    prediction_id: Optional[int] = None
+
+    Late_Risk_Probability: Optional[float] = None
+    Predicted_Late_Risk: Optional[int] = None
+    Prediction_Eligible: bool
+    Exclusion_Reason: Optional[str] = None
+
+
+class PersistedPredictResponse(BaseModel):
+    request_id: Optional[str] = None
+    predictions: List[PersistedPredictionItem]
+    model_version: str = "SupplyPrescript ML V2"
+    threshold_used: float

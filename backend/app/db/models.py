@@ -1,276 +1,294 @@
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
+    DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     SmallInteger,
     String,
     Text,
-    TIMESTAMP,
+    func,
+    text,
 )
-
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy.sql import func
 
 
 Base = declarative_base()
 
 
-class Shipment(Base):
-    __tablename__ = "shipments"
+class Order(Base):
+    __tablename__ = "orders"
 
-    shipment_id = Column(Integer, primary_key=True)
+    order_id = Column(BigInteger, primary_key=True, autoincrement=True)
 
-    origin = Column(String(120), nullable=False)
-    destination = Column(String(120), nullable=False)
+    order_type = Column("Type", String(50))
+    days_for_shipment_scheduled = Column(
+        "Days for shipment (scheduled)",
+        Integer,
+    )
 
-    carrier = Column(String(120))
-    product_type = Column(String(120))
-    quantity = Column(Numeric)
+    benefit_per_order = Column(
+        "Benefit per order",
+        Numeric(12, 2),
+    )
 
-    scheduled_ship_date = Column(TIMESTAMP)
-    scheduled_delivery_date = Column(TIMESTAMP)
+    sales_per_customer = Column(
+        "Sales per customer",
+        Numeric(12, 2),
+    )
 
-    created_at = Column(
-        TIMESTAMP,
+    category_name = Column(
+        "Category Name",
+        String(150),
+    )
+
+    customer_city = Column(
+        "Customer City",
+        String(150),
+    )
+
+    customer_country = Column(
+        "Customer Country",
+        String(100),
+    )
+
+    customer_segment = Column(
+        "Customer Segment",
+        String(100),
+    )
+
+    customer_state = Column(
+        "Customer State",
+        String(100),
+    )
+
+    department_name = Column(
+        "Department Name",
+        String(100),
+    )
+
+    latitude = Column(
+        "Latitude",
+        Numeric(10, 7),
+    )
+
+    longitude = Column(
+        "Longitude",
+        Numeric(10, 7),
+    )
+
+    market = Column(
+        "Market",
+        String(100),
+    )
+
+    order_city = Column(
+        "Order City",
+        String(150),
+    )
+
+    order_country = Column(
+        "Order Country",
+        String(100),
+    )
+
+    order_item_discount = Column(
+        "Order Item Discount",
+        Numeric(12, 2),
+    )
+
+    order_item_discount_rate = Column(
+        "Order Item Discount Rate",
+        Numeric(8, 4),
+    )
+
+    order_item_product_price = Column(
+        "Order Item Product Price",
+        Numeric(12, 2),
+    )
+
+    order_item_profit_ratio = Column(
+        "Order Item Profit Ratio",
+        Numeric(8, 4),
+    )
+
+    order_item_quantity = Column(
+        "Order Item Quantity",
+        Integer,
+    )
+
+    sales = Column(
+        "Sales",
+        Numeric(12, 2),
+    )
+
+    order_item_total = Column(
+        "Order Item Total",
+        Numeric(12, 2),
+    )
+
+    order_profit_per_order = Column(
+        "Order Profit Per Order",
+        Numeric(12, 2),
+    )
+
+    order_region = Column(
+        "Order Region",
+        String(150),
+    )
+
+    order_state = Column(
+        "Order State",
+        String(150),
+    )
+
+    product_category_id = Column(
+        "Product Category Id",
+        Integer,
+    )
+
+    product_name = Column(
+        "Product Name",
+        String(255),
+    )
+
+    product_price = Column(
+        "Product Price",
+        Numeric(12, 2),
+    )
+
+    order_year = Column(
+        "Order_Year",
+        SmallInteger,
+    )
+
+    order_month = Column(
+        "Order_Month",
+        SmallInteger,
+    )
+
+    order_day_of_week = Column(
+        "Order_DayOfWeek",
+        SmallInteger,
+    )
+
+    order_day = Column(
+        "Order_Day",
+        SmallInteger,
+    )
+
+    order_status = Column(
+        String(50),
+    )
+
+    received_at = Column(
+        DateTime,
         nullable=False,
         server_default=func.now(),
     )
 
+    source_system = Column(
+        String(100),
+    )
+
+    raw_payload = Column(
+        JSONB,
+    )
+
     predictions = relationship(
-        "Prediction",
-        back_populates="shipment",
-        cascade="all, delete",
-    )
-
-    decisions = relationship(
-        "Decision",
-        back_populates="shipment",
+        "MLPrediction",
+        back_populates="order",
+        cascade="all, delete-orphan",
     )
 
 
-class Prediction(Base):
-    __tablename__ = "predictions"
+class MLPrediction(Base):
+    __tablename__ = "ml_predictions"
 
-    prediction_id = Column(Integer, primary_key=True)
+    
+    __table_args__ = (
+    CheckConstraint(
+        "late_risk_probability BETWEEN 0 AND 1",
+        name="ck_ml_predictions_probability",
+        ),
+    )
 
-    shipment_id = Column(
-        Integer,
+
+    prediction_id = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    order_id = Column(
+        BigInteger,
         ForeignKey(
-            "shipments.shipment_id",
+            "orders.order_id",
             ondelete="CASCADE",
         ),
-        nullable=False,
-    )
-
-    risk_probability = Column(
-        Numeric(5, 4),
-        nullable=False,
-    )
-
-    predicted_class = Column(
-        String(20),
         nullable=False,
     )
 
     model_version = Column(
-        String(50),
+        String(100),
         nullable=False,
     )
 
-    eligibility_status = Column(
-        String(30),
+    late_risk_probability = Column(
+        Numeric(8, 6),
         nullable=False,
-        default="eligible",
+    )
+
+    predicted_late_risk = Column(
+        Boolean,
+        nullable=False,
+    )
+
+    prediction_eligible = Column(
+        Boolean,
+        nullable=False,
+    )
+
+    exclusion_reason = Column(
+        Text,
+    )
+
+    threshold_used = Column(
+    Numeric(8, 6),
+    nullable=False,
+    server_default=text("0.18"),
+    )
+
+    ensemble_models_used = Column(
+        ARRAY(Text),
     )
 
     created_at = Column(
-        TIMESTAMP,
+        DateTime,
         nullable=False,
         server_default=func.now(),
     )
 
-    __table_args__ = (
-        CheckConstraint(
-            "risk_probability BETWEEN 0 AND 1",
-            name="risk_probability_range",
-        ),
+    request_id = Column(
+        String(100),
     )
 
-    shipment = relationship(
-        "Shipment",
+    order = relationship(
+        "Order",
         back_populates="predictions",
     )
 
-    recommendations = relationship(
-        "Recommendation",
-        back_populates="prediction",
-        cascade="all, delete",
-    )
+Index(
+    "idx_ml_predictions_order",
+    MLPrediction.order_id,
+)
 
-
-class Recommendation(Base):
-    __tablename__ = "recommendations"
-
-    recommendation_id = Column(
-        Integer,
-        primary_key=True,
-    )
-
-    prediction_id = Column(
-        Integer,
-        ForeignKey(
-            "predictions.prediction_id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    )
-
-    action_id = Column(
-        String(50),
-        nullable=False,
-    )
-
-    action_name = Column(
-        String(120),
-        nullable=False,
-    )
-
-    predicted_cost = Column(
-        Numeric(12, 2),
-        nullable=False,
-    )
-
-    predicted_time_days = Column(
-        Numeric(6, 2),
-        nullable=False,
-    )
-
-    risk_score = Column(
-        Numeric(5, 4),
-    )
-
-    feasible = Column(
-        Boolean,
-        nullable=False,
-        default=True,
-    )
-
-    reason = Column(Text)
-
-    rank = Column(SmallInteger)
-
-    created_at = Column(
-        TIMESTAMP,
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    prediction = relationship(
-        "Prediction",
-        back_populates="recommendations",
-    )
-
-    decisions = relationship(
-        "Decision",
-        back_populates="recommendation",
-    )
-
-
-class Decision(Base):
-    __tablename__ = "decisions"
-
-    decision_id = Column(
-        Integer,
-        primary_key=True,
-    )
-
-    recommendation_id = Column(
-        Integer,
-        ForeignKey(
-            "recommendations.recommendation_id"
-        ),
-        nullable=False,
-    )
-
-    shipment_id = Column(
-        Integer,
-        ForeignKey("shipments.shipment_id"),
-        nullable=False,
-    )
-
-    executed_by = Column(String(120))
-
-    status = Column(
-        String(30),
-        nullable=False,
-        default="executed",
-    )
-
-    predicted_cost_at_exec = Column(
-        Numeric(12, 2),
-        nullable=False,
-    )
-
-    predicted_time_at_exec = Column(
-        Numeric(6, 2),
-        nullable=False,
-    )
-
-    executed_at = Column(
-        TIMESTAMP,
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    recommendation = relationship(
-        "Recommendation",
-        back_populates="decisions",
-    )
-
-    shipment = relationship(
-        "Shipment",
-        back_populates="decisions",
-    )
-
-    outcome = relationship(
-        "Outcome",
-        back_populates="decision",
-        uselist=False,
-        cascade="all, delete",
-    )
-
-
-class Outcome(Base):
-    __tablename__ = "outcomes"
-
-    outcome_id = Column(
-        Integer,
-        primary_key=True,
-    )
-
-    decision_id = Column(
-        Integer,
-        ForeignKey(
-            "decisions.decision_id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    )
-
-    actual_cost = Column(Numeric(12, 2))
-    actual_time_days = Column(Numeric(6, 2))
-    actual_delayed = Column(Boolean)
-
-    recorded_at = Column(
-        TIMESTAMP,
-        nullable=False,
-        server_default=func.now(),
-    )
-
-    decision = relationship(
-        "Decision",
-        back_populates="outcome",
-    )
+Index(
+    "idx_ml_predictions_created_at",
+    MLPrediction.created_at,
+)

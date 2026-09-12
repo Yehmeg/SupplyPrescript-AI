@@ -1,45 +1,91 @@
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.config import get_settings
-from app.ml.service import get_ml_service, MLService
-from app.api.schemas.prediction import PredictRequest, PredictResponse
-from app.api.schemas.optimization import OptimizeRequest, OptimizeResponse
-from app.optimization.service import get_optimization_service, OptimizationService
-
-from app.api.routes.writeback import router as writeback_router
-
 from sqlalchemy.orm import Session
+
+from app.config import get_settings
+
+from app.ml.service import (
+    get_ml_service,
+    MLService,
+)
+
+from app.optimization.service import (
+    get_optimization_service,
+    OptimizationService,
+)
+
+from app.api.schemas.prediction import (
+    PredictRequest,
+    PredictResponse,
+    PersistedPredictRequest,
+    PersistedPredictResponse,
+    PersistedPredictionItem,
+)
+
+from app.api.schemas.optimization import (
+    OptimizeRequest,
+    OptimizeResponse,
+)
 
 from app.db.database import get_db
 from app.db import crud
 
+from app.api.schemas.database import (
+    OrderDBResponse,
+    PredictionDBResponse,
+    OrderWithPredictionsResponse,
+)
+# ============================================================
+# APPLICATION LIFESPAN
+# ============================================================
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: pre-load ML artifacts
+    """
+    Preload ML artifacts when FastAPI starts.
+    """
+
     ml_service = get_ml_service()
+
     try:
         _ = ml_service.artifacts
-    except Exception as e:
-        print(f"Warning: Failed to load ML artifacts on startup: {e}")
-    yield
-    # Shutdown: nothing to clean up for now
+        print("ML artifacts loaded successfully.")
 
+    except Exception as e:
+        print(
+            "Warning: Failed to load ML artifacts "
+            f"on startup: {e}"
+        )
+
+    yield
+
+
+# ============================================================
+# CREATE FASTAPI APPLICATION
+# ============================================================
 
 def create_app() -> FastAPI:
+
     settings = get_settings()
 
     app = FastAPI(
         title="SupplyPrescript API",
         version="1.0.0",
-        description="API for late-delivery risk scoring and prescriptive recommendations",
+        description=(
+            "API for late-delivery risk scoring "
+            "and prescriptive supply-chain recommendations"
+        ),
         lifespan=lifespan,
     )
 
-    # CORS for React frontend
+    # --------------------------------------------------------
+    # CORS
+    # --------------------------------------------------------
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
@@ -48,20 +94,63 @@ def create_app() -> FastAPI:
         allow_headers=settings.CORS_ALLOW_HEADERS,
     )
 
-    # Database / write-back routes
-    app.include_router(writeback_router)
+    # ========================================================
+    # HEALTH
+    # ========================================================
 
-    @app.get("/health", tags=["health"])
+    @app.get(
+        "/health",
+        tags=["health"],
+    )
     async def health():
-        """Liveness probe - always returns 200 if process is running."""
-        return {"status": "ok"}
+        """
+        Liveness probe.
+        """
 
-    @app.get("/ready", tags=["health"])
-    async def ready(ml_service: MLService = Depends(get_ml_service)):
-        """Readiness probe - checks ML artifacts are loaded."""
+        return {
+            "status": "ok",
+        }
+
+    # ========================================================
+    # READY
+    # ========================================================
+
+    @app.get(
+        "/ready",
+        tags=["health"],
+    )
+    async def ready(
+        ml_service: MLService = Depends(
+            get_ml_service
+        ),
+    ):
+        """
+        Readiness probe.
+
+        Checks whether the trained ML artifacts
+        are available.
+        """
+
         if ml_service.is_ready():
-            return {"status": "ready", "models_loaded": ml_service.available_models()}
-        raise HTTPException(status_code=503, detail="ML artifacts not loaded")
+
+            return {
+                "status": "ready",
+                "models_loaded": (
+                    ml_service.available_models()
+                ),
+                "threshold": ml_service.threshold,
+            }
+
+        raise HTTPException(
+            status_code=503,
+            detail="ML artifacts not loaded",
+        )
+
+    # ========================================================
+    # STANDARD ML PREDICTION
+    #
+    # Does NOT write anything to PostgreSQL.
+    # ========================================================
 
     @app.post(
         f"{settings.API_PREFIX}/predict",
@@ -70,97 +159,371 @@ def create_app() -> FastAPI:
     )
     async def predict(
         request: PredictRequest,
-        ml_service: MLService = Depends(get_ml_service),
-        db: Session = Depends(get_db),
+        ml_service: MLService = Depends(
+            get_ml_service
+        ),
     ):
         """
-        Score late-delivery risk.
+        Run late-delivery prediction.
 
-        If shipment_ids are supplied, eligible predictions are also
-        persisted to the predictions table.
+        This endpoint only performs ML inference.
+
+        It does NOT persist the order or prediction
+        to PostgreSQL.
         """
 
         if not request.orders:
+
             raise HTTPException(
                 status_code=400,
                 detail="At least one order is required",
             )
 
-        if (
-            request.shipment_ids is not None
-            and len(request.shipment_ids) != len(request.orders)
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="shipment_ids must match the number of orders",
+        try:
+
+            predictions = ml_service.predict(
+                request.orders
             )
 
-        try:
-            predictions = ml_service.predict(request.orders)
-
-            prediction_ids = None
-
-            # --------------------------------------------------
-            # Optional database persistence
-            # --------------------------------------------------
-            if request.shipment_ids is not None:
-                prediction_ids = []
-
-                for shipment_id, prediction in zip(
-                    request.shipment_ids,
-                    predictions,
-                ):
-
-                    # Current DB schema requires probability and class.
-                    # Excluded orders cannot be stored without inventing
-                    # values, so keep their DB id as None.
-                    if (
-                        not prediction.Prediction_Eligible
-                        or prediction.Late_Risk_Probability is None
-                        or prediction.Predicted_Late_Risk is None
-                    ):
-                        prediction_ids.append(None)
-                        continue
-
-                    predicted_class = (
-                        "delayed"
-                        if prediction.Predicted_Late_Risk == 1
-                        else "on_time"
-                    )
-
-                    db_prediction = crud.insert_prediction(
-                        db,
-                        shipment_id=shipment_id,
-                        risk_probability=(
-                            prediction.Late_Risk_Probability
-                        ),
-                        predicted_class=predicted_class,
-                        model_version="SupplyPrescript ML V2",
-                        eligibility_status="eligible",
-                    )
-
-                    prediction_ids.append(
-                        db_prediction.prediction_id
-                    )
-
         except ValueError as e:
+
             raise HTTPException(
                 status_code=422,
                 detail=str(e),
             )
 
         except Exception as e:
+
             raise HTTPException(
                 status_code=500,
-                detail=f"Prediction failed: {str(e)}",
+                detail=(
+                    "Prediction failed: "
+                    f"{str(e)}"
+                ),
             )
 
         return PredictResponse(
             request_id=request.request_id,
             predictions=predictions,
             threshold_used=ml_service.threshold,
-            prediction_ids=prediction_ids,
+            prediction_ids=None,
         )
+
+    # ========================================================
+    # ORDER + ML PREDICTION + DATABASE PERSISTENCE
+    #
+    # Flow:
+    #
+    # API request
+    #     ↓
+    # orders table
+    #     ↓
+    # ML inference
+    #     ↓
+    # ml_predictions table
+    #     ↓
+    # API response
+    # ========================================================
+
+    @app.post(
+        f"{settings.API_PREFIX}/orders/predict",
+        response_model=PersistedPredictResponse,
+        tags=["predictions"],
+    )
+    def predict_and_persist_order(
+        payload: PersistedPredictRequest,
+        ml_service: MLService = Depends(
+            get_ml_service
+        ),
+        db: Session = Depends(
+            get_db
+        ),
+    ):
+        """
+        Store incoming orders, run ML inference,
+        and store eligible predictions.
+
+        Current database tables:
+
+        orders
+            ↓
+        ml_predictions
+        """
+
+        if not payload.orders:
+
+            raise HTTPException(
+                status_code=400,
+                detail="At least one order is required.",
+            )
+
+        try:
+
+            # ------------------------------------------------
+            # 1. RUN EXISTING TRAINED ML PIPELINE
+            # ------------------------------------------------
+
+            predictions = ml_service.predict(
+                payload.orders
+            )
+
+            persisted_results = []
+
+            # ------------------------------------------------
+            # 2. PROCESS EACH ORDER + PREDICTION
+            # ------------------------------------------------
+
+            for order_input, prediction in zip(
+                payload.orders,
+                predictions,
+            ):
+
+                # Keep original dataset/API field names.
+                order_payload = (
+                    order_input.model_dump(
+                        by_alias=True
+                    )
+                )
+
+                # --------------------------------------------
+                # 3. STORE ORDER
+                # --------------------------------------------
+
+                db_order = crud.insert_order(
+                    db,
+                    payload=order_payload,
+                    source_system="api",
+                )
+
+                prediction_id = None
+
+                probability = (
+                    prediction.Late_Risk_Probability
+                )
+
+                predicted_class = (
+                    prediction.Predicted_Late_Risk
+                )
+
+                eligible = (
+                    prediction.Prediction_Eligible
+                )
+
+                exclusion_reason = (
+                    prediction.Exclusion_Reason
+                )
+
+                # --------------------------------------------
+                # 4. STORE ELIGIBLE ML PREDICTION
+                # --------------------------------------------
+                #
+                # Current SQL schema requires:
+                #
+                # late_risk_probability NOT NULL
+                # predicted_late_risk   NOT NULL
+                #
+                # Therefore excluded/non-predictable rows
+                # are kept in orders but are not inserted
+                # into ml_predictions.
+                # --------------------------------------------
+
+                if (
+                    eligible
+                    and probability is not None
+                    and predicted_class is not None
+                ):
+
+                    db_prediction = (
+                        crud.insert_ml_prediction(
+                            db,
+                            order_id=(
+                                db_order.order_id
+                            ),
+                            model_version=(
+                                "SupplyPrescript ML V2"
+                            ),
+                            late_risk_probability=(
+                                float(probability)
+                            ),
+                            predicted_late_risk=(
+                                bool(predicted_class)
+                            ),
+                            prediction_eligible=(
+                                bool(eligible)
+                            ),
+                            exclusion_reason=(
+                                exclusion_reason
+                            ),
+                            threshold_used=(
+                                float(
+                                    ml_service.threshold
+                                )
+                            ),
+                            ensemble_models_used=[
+                                "XGBoost",
+                                "LightGBM",
+                                "CatBoost",
+                            ],
+                            request_id=(
+                                payload.request_id
+                            ),
+                        )
+                    )
+
+                    prediction_id = (
+                        db_prediction.prediction_id
+                    )
+
+                # --------------------------------------------
+                # 5. BUILD API RESPONSE ITEM
+                # --------------------------------------------
+
+                persisted_results.append(
+                    PersistedPredictionItem(
+                        order_id=(
+                            db_order.order_id
+                        ),
+                        prediction_id=(
+                            prediction_id
+                        ),
+                        Late_Risk_Probability=(
+                            probability
+                        ),
+                        Predicted_Late_Risk=(
+                            predicted_class
+                        ),
+                        Prediction_Eligible=(
+                            eligible
+                        ),
+                        Exclusion_Reason=(
+                            exclusion_reason
+                        ),
+                    )
+                )
+
+            # ------------------------------------------------
+            # 6. RETURN COMPLETE RESULT
+            # ------------------------------------------------
+
+            return PersistedPredictResponse(
+                request_id=(
+                    payload.request_id
+                ),
+                predictions=(
+                    persisted_results
+                ),
+                model_version=(
+                    "SupplyPrescript ML V2"
+                ),
+                threshold_used=(
+                    float(
+                        ml_service.threshold
+                    )
+                ),
+            )
+
+        except ValueError as e:
+
+            raise HTTPException(
+                status_code=422,
+                detail=str(e),
+            )
+
+        except HTTPException:
+
+            raise
+
+        except Exception as e:
+
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Order prediction failed: "
+                    f"{str(e)}"
+                ),
+            )
+    @app.get(
+    f"{settings.API_PREFIX}/orders/{{order_id}}",
+    response_model=OrderDBResponse,
+    tags=["database"],
+    )
+    def get_order_by_id(
+        order_id: int,
+        db: Session = Depends(get_db),
+    ):
+        order = crud.get_order(
+            db,
+            order_id,
+        )
+
+        if order is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        return order
+
+
+    @app.get(
+        f"{settings.API_PREFIX}/predictions/{{prediction_id}}",
+        response_model=PredictionDBResponse,
+        tags=["database"],
+    )
+    def get_prediction_by_id(
+        prediction_id: int,
+        db: Session = Depends(get_db),
+    ):
+        prediction = crud.get_prediction(
+            db,
+            prediction_id,
+        )
+
+        if prediction is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Prediction not found",
+            )
+
+        return prediction
+
+
+    @app.get(
+        f"{settings.API_PREFIX}/orders/{{order_id}}/predictions",
+        response_model=OrderWithPredictionsResponse,
+        tags=["database"],
+    )
+    def get_order_predictions(
+        order_id: int,
+        db: Session = Depends(get_db),
+    ):
+        order = crud.get_order(
+            db,
+            order_id,
+        )
+
+        if order is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found",
+            )
+
+        predictions = crud.get_predictions_for_order(
+            db,
+            order_id,
+        )
+
+        return {
+            "order": order,
+            "predictions": predictions,
+        }
+    # ========================================================
+    # OPTIMIZATION
+    #
+    # Optimization still works, but it is NOT persisted yet
+    # because the new supplied DB schema currently contains
+    # only orders + ml_predictions.
+    # ========================================================
 
     @app.post(
         f"{settings.API_PREFIX}/optimize",
@@ -172,34 +535,26 @@ def create_app() -> FastAPI:
         optimization_service: OptimizationService = Depends(
             get_optimization_service
         ),
-        db: Session = Depends(get_db),
     ):
         """
-        Optimize interventions.
+        Run SupplyPrescript intervention optimization.
 
-        If prediction_ids are supplied, selected recommendations are
-        also persisted to the recommendations table.
+        Current version returns optimizer recommendations
+        without writing them to PostgreSQL.
         """
 
         if not request.shipments:
-            raise HTTPException(
-                status_code=400,
-                detail="At least one shipment is required",
-            )
 
-        if (
-            request.prediction_ids is not None
-            and len(request.prediction_ids) != len(request.shipments)
-        ):
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "prediction_ids must match "
-                    "the number of shipments"
+                    "At least one shipment "
+                    "is required"
                 ),
             )
 
         try:
+
             (
                 status,
                 recommendations,
@@ -210,96 +565,60 @@ def create_app() -> FastAPI:
                 request.constraints,
             )
 
-            recommendation_ids = None
-
-            # --------------------------------------------------
-            # Optional database persistence
-            # --------------------------------------------------
-            if request.prediction_ids is not None:
-                recommendation_ids = []
-
-                # Validate before writing anything.
-                for prediction_id, recommendation in zip(
-                    request.prediction_ids,
-                    recommendations,
-                ):
-                    if (
-                        prediction_id is not None
-                        and recommendation.predicted_time_days is None
-                    ):
-                        raise ValueError(
-                            "baseline_time_days is required "
-                            "when persisting recommendations"
-                        )
-
-                for prediction_id, recommendation in zip(
-                    request.prediction_ids,
-                    recommendations,
-                ):
-                    # A missing prediction_id means there is no
-                    # persisted prediction to attach to.
-                    if prediction_id is None:
-                        recommendation_ids.append(None)
-                        continue
-
-                    rows = crud.insert_recommendations(
-                        db,
-                        prediction_id=prediction_id,
-                        recommendations=[
-                            {
-                                "action_id": recommendation.action_id,
-                                "action_name": (
-                                    recommendation.selected_action
-                                ),
-                                "predicted_cost": (
-                                    recommendation.action_cost
-                                ),
-                                "predicted_time_days": (
-                                    recommendation.predicted_time_days
-                                ),
-                                "risk_score": (
-                                    recommendation.risk_after
-                                ),
-                                "feasible": True,
-                                "reason": None,
-                                "rank": 1,
-                            }
-                        ],
-                    )
-
-                    recommendation_ids.append(
-                        rows[0].recommendation_id
-                    )
-
         except ValueError as e:
+
             raise HTTPException(
                 status_code=422,
                 detail=str(e),
             )
 
         except Exception as e:
+
             raise HTTPException(
                 status_code=500,
-                detail=f"Optimization failed: {str(e)}",
+                detail=(
+                    "Optimization failed: "
+                    f"{str(e)}"
+                ),
             )
 
         return OptimizeResponse(
             request_id=request.request_id,
             optimization_status=status,
-            total_intervention_cost=total_cost,
-            total_expected_saving=total_saving,
-            recommendations=recommendations,
-            recommendation_ids=recommendation_ids,
+            total_intervention_cost=(
+                total_cost
+            ),
+            total_expected_saving=(
+                total_saving
+            ),
+            recommendations=(
+                recommendations
+            ),
+            recommendation_ids=None,
         )
 
+    # ========================================================
+    # GLOBAL VALUE ERROR HANDLER
+    # ========================================================
+
     @app.exception_handler(ValueError)
-    async def value_error_handler(request, exc):
+    async def value_error_handler(
+        request,
+        exc,
+    ):
+
         return JSONResponse(
             status_code=422,
-            content={"detail": str(exc)},
+            content={
+                "detail": str(exc),
+            },
         )
 
     return app
 
+
+# ============================================================
+# APPLICATION INSTANCE
+# ============================================================
 
 app = create_app()

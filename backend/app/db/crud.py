@@ -1,48 +1,109 @@
-from sqlalchemy import select
+from typing import Any, Optional
+
 from sqlalchemy.orm import Session
 
-from app.db.models import (
-    Decision,
-    Outcome,
-    Prediction,
-    Recommendation,
-    Shipment,
-)
+from app.db.models import MLPrediction, Order
 
 
-# ============================================================
-# INSERTS
-# ============================================================
+# Maps the ML/API feature names to Python ORM attribute names.
+ORDER_FIELD_MAP = {
+    "Type": "order_type",
+    "Days for shipment (scheduled)": "days_for_shipment_scheduled",
+    "Benefit per order": "benefit_per_order",
+    "Sales per customer": "sales_per_customer",
+    "Category Name": "category_name",
+    "Customer City": "customer_city",
+    "Customer Country": "customer_country",
+    "Customer Segment": "customer_segment",
+    "Customer State": "customer_state",
+    "Department Name": "department_name",
+    "Latitude": "latitude",
+    "Longitude": "longitude",
+    "Market": "market",
+    "Order City": "order_city",
+    "Order Country": "order_country",
+    "Order Item Discount": "order_item_discount",
+    "Order Item Discount Rate": "order_item_discount_rate",
+    "Order Item Product Price": "order_item_product_price",
+    "Order Item Profit Ratio": "order_item_profit_ratio",
+    "Order Item Quantity": "order_item_quantity",
+    "Sales": "sales",
+    "Order Item Total": "order_item_total",
+    "Order Profit Per Order": "order_profit_per_order",
+    "Order Region": "order_region",
+    "Order State": "order_state",
+    "Product Category Id": "product_category_id",
+    "Product Name": "product_name",
+    "Product Price": "product_price",
+    "Order_Year": "order_year",
+    "Order_Month": "order_month",
+    "Order_DayOfWeek": "order_day_of_week",
+    "Order_Day": "order_day",
+}
 
-def insert_shipment(
+
+def insert_order(
     db: Session,
-    shipment_data: dict,
-) -> Shipment:
+    payload: dict[str, Any],
+    source_system: str = "api",
+) -> Order:
+    """
+    Insert one incoming order into the orders table.
+    """
 
-    shipment = Shipment(**shipment_data)
+    order_values = {}
 
-    db.add(shipment)
+    for source_name, model_name in ORDER_FIELD_MAP.items():
+        if source_name in payload:
+            order_values[model_name] = payload[source_name]
+
+    # Support either naming convention.
+    if "order_status" in payload:
+        order_values["order_status"] = payload["order_status"]
+    elif "Order Status" in payload:
+        order_values["order_status"] = payload["Order Status"]
+
+    order_values["source_system"] = source_system
+
+    # Keep the original request for auditing/debugging.
+    order_values["raw_payload"] = payload
+
+    order = Order(**order_values)
+
+    db.add(order)
     db.commit()
-    db.refresh(shipment)
+    db.refresh(order)
 
-    return shipment
+    return order
 
 
-def insert_prediction(
+def insert_ml_prediction(
     db: Session,
-    shipment_id: int,
-    risk_probability: float,
-    predicted_class: str,
+    *,
+    order_id: int,
     model_version: str,
-    eligibility_status: str = "eligible",
-) -> Prediction:
+    late_risk_probability: float,
+    predicted_late_risk: bool,
+    prediction_eligible: bool,
+    threshold_used: float,
+    ensemble_models_used: Optional[list[str]] = None,
+    exclusion_reason: Optional[str] = None,
+    request_id: Optional[str] = None,
+) -> MLPrediction:
+    """
+    Store one ML prediction linked to an existing order.
+    """
 
-    prediction = Prediction(
-        shipment_id=shipment_id,
-        risk_probability=risk_probability,
-        predicted_class=predicted_class,
+    prediction = MLPrediction(
+        order_id=order_id,
         model_version=model_version,
-        eligibility_status=eligibility_status,
+        late_risk_probability=late_risk_probability,
+        predicted_late_risk=predicted_late_risk,
+        prediction_eligible=prediction_eligible,
+        exclusion_reason=exclusion_reason,
+        threshold_used=threshold_used,
+        ensemble_models_used=ensemble_models_used,
+        request_id=request_id,
     )
 
     db.add(prediction)
@@ -52,240 +113,49 @@ def insert_prediction(
     return prediction
 
 
-def insert_recommendations(
+def get_order(
+    db: Session,
+    order_id: int,
+) -> Optional[Order]:
+    return (
+        db.query(Order)
+        .filter(Order.order_id == order_id)
+        .first()
+    )
+
+
+def get_prediction(
     db: Session,
     prediction_id: int,
-    recommendations: list[dict],
-) -> list[Recommendation]:
-
-    rows = [
-        Recommendation(
-            prediction_id=prediction_id,
-            **recommendation,
+) -> Optional[MLPrediction]:
+    return (
+        db.query(MLPrediction)
+        .filter(
+            MLPrediction.prediction_id == prediction_id
         )
-        for recommendation in recommendations
-    ]
-
-    db.add_all(rows)
-    db.commit()
-
-    for row in rows:
-        db.refresh(row)
-
-    return rows
-
-
-def execute_decision(
-    db: Session,
-    recommendation_id: int,
-    shipment_id: int,
-    executed_by: str,
-    predicted_cost_at_exec: float,
-    predicted_time_at_exec: float,
-) -> Decision:
-
-    decision = Decision(
-        recommendation_id=recommendation_id,
-        shipment_id=shipment_id,
-        executed_by=executed_by,
-        status="executed",
-        predicted_cost_at_exec=predicted_cost_at_exec,
-        predicted_time_at_exec=predicted_time_at_exec,
+        .first()
     )
 
-    try:
-        db.add(decision)
-        db.commit()
-        db.refresh(decision)
 
-        return decision
-
-    except Exception:
-        db.rollback()
-        raise
-
-
-def insert_outcome(
+def get_predictions_for_order(
     db: Session,
-    decision_id: int,
-    actual_cost: float,
-    actual_time_days: float,
-    actual_delayed: bool,
-) -> Outcome:
-
-    outcome = Outcome(
-        decision_id=decision_id,
-        actual_cost=actual_cost,
-        actual_time_days=actual_time_days,
-        actual_delayed=actual_delayed,
-    )
-
-    db.add(outcome)
-    db.commit()
-    db.refresh(outcome)
-
-    return outcome
-
-
-# ============================================================
-# RETRIEVALS
-# ============================================================
-
-def get_shipment(
-    db: Session,
-    shipment_id: int,
-) -> Shipment | None:
-
-    return db.get(
-        Shipment,
-        shipment_id,
+    order_id: int,
+) -> list[MLPrediction]:
+    return (
+        db.query(MLPrediction)
+        .filter(MLPrediction.order_id == order_id)
+        .order_by(MLPrediction.created_at.desc())
+        .all()
     )
 
 
 def get_latest_prediction(
     db: Session,
-    shipment_id: int,
-) -> Prediction | None:
-
-    stmt = (
-        select(Prediction)
-        .where(
-            Prediction.shipment_id == shipment_id
-        )
-        .order_by(
-            Prediction.created_at.desc()
-        )
-        .limit(1)
+    order_id: int,
+) -> Optional[MLPrediction]:
+    return (
+        db.query(MLPrediction)
+        .filter(MLPrediction.order_id == order_id)
+        .order_by(MLPrediction.created_at.desc())
+        .first()
     )
-
-    return db.execute(
-        stmt
-    ).scalar_one_or_none()
-
-
-def get_recommendations_for_prediction(
-    db: Session,
-    prediction_id: int,
-) -> list[Recommendation]:
-
-    stmt = (
-        select(Recommendation)
-        .where(
-            Recommendation.prediction_id
-            == prediction_id
-        )
-        .order_by(
-            Recommendation.rank.asc()
-        )
-    )
-
-    return list(
-        db.execute(stmt).scalars()
-    )
-
-
-def get_decision_history(
-    db: Session,
-    shipment_id: int | None = None,
-) -> list[Decision]:
-
-    stmt = select(
-        Decision
-    ).order_by(
-        Decision.executed_at.desc()
-    )
-
-    if shipment_id is not None:
-        stmt = stmt.where(
-            Decision.shipment_id == shipment_id
-        )
-
-    return list(
-        db.execute(stmt).scalars()
-    )
-
-
-def get_decision_roi(
-    db: Session,
-    decision_id: int,
-) -> dict | None:
-
-    decision = db.get(
-        Decision,
-        decision_id,
-    )
-
-    if decision is None:
-        return None
-
-    outcome = decision.outcome
-
-    if outcome is None:
-        return {
-            "decision_id": decision_id,
-            "status": "outcome_pending",
-        }
-
-    predicted_cost = float(
-        decision.predicted_cost_at_exec
-    )
-
-    actual_cost = (
-        float(outcome.actual_cost)
-        if outcome.actual_cost is not None
-        else None
-    )
-
-    predicted_time = float(
-        decision.predicted_time_at_exec
-    )
-
-    actual_time = (
-        float(outcome.actual_time_days)
-        if outcome.actual_time_days is not None
-        else None
-    )
-
-    return {
-        "decision_id": decision_id,
-        "shipment_id": decision.shipment_id,
-
-        "predicted_cost": predicted_cost,
-        "actual_cost": actual_cost,
-
-        "cost_savings": (
-            predicted_cost - actual_cost
-            if actual_cost is not None
-            else None
-        ),
-
-        "predicted_time_days": predicted_time,
-        "actual_time_days": actual_time,
-
-        "actual_delayed": outcome.actual_delayed,
-    }
-
-
-def get_all_roi(
-    db: Session,
-) -> list[dict]:
-
-    stmt = select(Decision)
-
-    decisions = db.execute(
-        stmt
-    ).scalars()
-
-    results = []
-
-    for decision in decisions:
-
-        roi = get_decision_roi(
-            db,
-            decision.decision_id,
-        )
-
-        if roi:
-            results.append(roi)
-
-    return results
