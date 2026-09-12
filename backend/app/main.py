@@ -520,9 +520,10 @@ def create_app() -> FastAPI:
     # ========================================================
     # OPTIMIZATION
     #
-    # Optimization still works, but it is NOT persisted yet
-    # because the new supplied DB schema currently contains
-    # only orders + ml_predictions.
+    # Runs the PuLP optimizer normally.
+    #
+    # If prediction_ids are supplied, the optimization run
+    # and its recommendations are persisted to PostgreSQL.
     # ========================================================
 
     @app.post(
@@ -535,23 +536,68 @@ def create_app() -> FastAPI:
         optimization_service: OptimizationService = Depends(
             get_optimization_service
         ),
+        db: Session = Depends(get_db),
     ):
         """
         Run SupplyPrescript intervention optimization.
 
-        Current version returns optimizer recommendations
-        without writing them to PostgreSQL.
+        Without prediction_ids:
+            optimizer only
+
+        With prediction_ids:
+            optimizer
+                -> optimization_runs
+                -> optimization_recommendations
         """
 
         if not request.shipments:
-
             raise HTTPException(
                 status_code=400,
+                detail="At least one shipment is required",
+            )
+
+        # ----------------------------------------------------
+        # prediction_ids must correspond 1-to-1 with shipments
+        # ----------------------------------------------------
+
+        if (
+            request.prediction_ids is not None
+            and len(request.prediction_ids)
+            != len(request.shipments)
+        ):
+            raise HTTPException(
+                status_code=422,
                 detail=(
-                    "At least one shipment "
-                    "is required"
+                    "prediction_ids count must match "
+                    "shipments count"
                 ),
             )
+
+        # ----------------------------------------------------
+        # If DB prediction IDs were supplied, verify that
+        # every non-null prediction actually exists.
+        # ----------------------------------------------------
+
+        if request.prediction_ids is not None:
+
+            for prediction_id in request.prediction_ids:
+
+                if prediction_id is None:
+                    continue
+
+                prediction = crud.get_prediction(
+                    db,
+                    prediction_id,
+                )
+
+                if prediction is None:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=(
+                            f"Prediction {prediction_id} "
+                            "not found"
+                        ),
+                    )
 
         try:
 
@@ -565,12 +611,56 @@ def create_app() -> FastAPI:
                 request.constraints,
             )
 
+            recommendation_ids = None
+
+            # ------------------------------------------------
+            # Persist only when prediction_ids are supplied
+            # ------------------------------------------------
+
+            if request.prediction_ids is not None:
+
+                optimization_run = (
+                    crud.insert_optimization_run(
+                        db,
+                        request_id=request.request_id,
+                        optimization_status=status,
+                        total_intervention_cost=(
+                            total_cost
+                        ),
+                        total_expected_saving=(
+                            total_saving
+                        ),
+                    )
+                )
+
+                persisted_recommendations = (
+                    crud.insert_optimization_recommendations(
+                        db,
+                        run_id=optimization_run.run_id,
+                        prediction_ids=(
+                            request.prediction_ids
+                        ),
+                        recommendations=(
+                            recommendations
+                        ),
+                    )
+                )
+
+                recommendation_ids = [
+                    row.recommendation_id
+                    for row
+                    in persisted_recommendations
+                ]
+
         except ValueError as e:
 
             raise HTTPException(
                 status_code=422,
                 detail=str(e),
             )
+
+        except HTTPException:
+            raise
 
         except Exception as e:
 
@@ -585,16 +675,12 @@ def create_app() -> FastAPI:
         return OptimizeResponse(
             request_id=request.request_id,
             optimization_status=status,
-            total_intervention_cost=(
-                total_cost
+            total_intervention_cost=total_cost,
+            total_expected_saving=total_saving,
+            recommendations=recommendations,
+            recommendation_ids=(
+                recommendation_ids
             ),
-            total_expected_saving=(
-                total_saving
-            ),
-            recommendations=(
-                recommendations
-            ),
-            recommendation_ids=None,
         )
 
     # ========================================================

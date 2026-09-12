@@ -2,7 +2,12 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.db.models import MLPrediction, Order
+from app.db.models import (
+    MLPrediction,
+    OptimizationRecommendation,
+    OptimizationRun,
+    Order,
+)
 
 
 # Maps the ML/API feature names to Python ORM attribute names.
@@ -158,4 +163,130 @@ def get_latest_prediction(
         .filter(MLPrediction.order_id == order_id)
         .order_by(MLPrediction.created_at.desc())
         .first()
+    )
+
+def insert_optimization_run(
+    db: Session,
+    *,
+    request_id: Optional[str],
+    optimization_status: str,
+    total_intervention_cost: float,
+    total_expected_saving: float,
+) -> OptimizationRun:
+
+    run = OptimizationRun(
+        request_id=request_id,
+        optimization_status=optimization_status,
+        total_intervention_cost=total_intervention_cost,
+        total_expected_saving=total_expected_saving,
+    )
+
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    return run
+
+
+def insert_optimization_recommendations(
+    db: Session,
+    *,
+    run_id: int,
+    prediction_ids: list[Optional[int]],
+    recommendations: list[Any],
+) -> list[OptimizationRecommendation]:
+
+    if len(prediction_ids) != len(recommendations):
+        raise ValueError(
+            "prediction_ids count must match recommendations count"
+        )
+
+    rows = []
+
+    for prediction_id, recommendation in zip(
+        prediction_ids,
+        recommendations,
+    ):
+        # Support either Pydantic objects or dictionaries.
+        if hasattr(recommendation, "model_dump"):
+            data = recommendation.model_dump()
+        else:
+            data = dict(recommendation)
+
+        row = OptimizationRecommendation(
+            run_id=run_id,
+            prediction_id=prediction_id,
+            shipment_id=data["shipment_id"],
+            action_id=data["action_id"],
+            selected_action=data["selected_action"],
+            late_probability=data["late_probability"],
+            risk_after=data["risk_after"],
+            action_cost=data["action_cost"],
+            baseline_expected_loss=data[
+                "baseline_expected_loss"
+            ],
+            optimized_expected_cost=data[
+                "optimized_expected_cost"
+            ],
+            expected_saving=data["expected_saving"],
+            predicted_time_days=data.get(
+                "predicted_time_days"
+            ),
+        )
+
+        db.add(row)
+        rows.append(row)
+
+    db.commit()
+
+    for row in rows:
+        db.refresh(row)
+
+    return rows
+
+
+def get_optimization_run(
+    db: Session,
+    run_id: int,
+) -> Optional[OptimizationRun]:
+
+    return (
+        db.query(OptimizationRun)
+        .filter(
+            OptimizationRun.run_id == run_id
+        )
+        .first()
+    )
+
+
+def get_recommendation(
+    db: Session,
+    recommendation_id: int,
+) -> Optional[OptimizationRecommendation]:
+
+    return (
+        db.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.recommendation_id
+            == recommendation_id
+        )
+        .first()
+    )
+
+
+def get_recommendations_for_run(
+    db: Session,
+    run_id: int,
+) -> list[OptimizationRecommendation]:
+
+    return (
+        db.query(OptimizationRecommendation)
+        .filter(
+            OptimizationRecommendation.run_id
+            == run_id
+        )
+        .order_by(
+            OptimizationRecommendation.recommendation_id
+        )
+        .all()
     )

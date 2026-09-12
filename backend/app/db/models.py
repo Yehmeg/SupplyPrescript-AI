@@ -283,6 +283,145 @@ class MLPrediction(Base):
         back_populates="predictions",
     )
 
+class OptimizationRun(Base):
+    __tablename__ = "optimization_runs"
+
+    run_id = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    request_id = Column(
+        String(100),
+    )
+
+    optimization_status = Column(
+        String(50),
+        nullable=False,
+    )
+
+    total_intervention_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    total_expected_saving = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    recommendations = relationship(
+        "OptimizationRecommendation",
+        back_populates="run",
+        cascade="all, delete-orphan",
+    )
+
+
+class OptimizationRecommendation(Base):
+    __tablename__ = "optimization_recommendations"
+
+    __table_args__ = (
+        CheckConstraint(
+            "late_probability BETWEEN 0 AND 1",
+            name="ck_optimization_recommendations_late_probability",
+        ),
+        CheckConstraint(
+            "risk_after BETWEEN 0 AND 1",
+            name="ck_optimization_recommendations_risk_after",
+        ),
+    )
+
+    recommendation_id = Column(
+        BigInteger,
+        primary_key=True,
+        autoincrement=True,
+    )
+
+    run_id = Column(
+        BigInteger,
+        ForeignKey(
+            "optimization_runs.run_id",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    )
+
+    prediction_id = Column(
+        BigInteger,
+        ForeignKey(
+            "ml_predictions.prediction_id",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    )
+
+    shipment_id = Column(
+        String(100),
+        nullable=False,
+    )
+
+    action_id = Column(
+        String(50),
+        nullable=False,
+    )
+
+    selected_action = Column(
+        String(100),
+        nullable=False,
+    )
+
+    late_probability = Column(
+        Numeric(8, 6),
+        nullable=False,
+    )
+
+    risk_after = Column(
+        Numeric(8, 6),
+        nullable=False,
+    )
+
+    action_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    baseline_expected_loss = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    optimized_expected_cost = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    expected_saving = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    predicted_time_days = Column(
+        Numeric(10, 4),
+        nullable=True,
+    )
+
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    run = relationship(
+        "OptimizationRun",
+        back_populates="recommendations",
+    )
 Index(
     "idx_ml_predictions_order",
     MLPrediction.order_id,
@@ -291,4 +430,19 @@ Index(
 Index(
     "idx_ml_predictions_created_at",
     MLPrediction.created_at,
+)
+
+Index(
+    "idx_optimization_recommendations_run",
+    OptimizationRecommendation.run_id,
+)
+
+Index(
+    "idx_optimization_recommendations_prediction",
+    OptimizationRecommendation.prediction_id,
+)
+
+Index(
+    "idx_optimization_runs_created_at",
+    OptimizationRun.created_at,
 )
