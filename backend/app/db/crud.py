@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import (
     MLPrediction,
+    OptimizationOutcome,
     OptimizationRecommendation,
     OptimizationRun,
     Order,
@@ -375,3 +376,67 @@ def mark_decision_executed(
     db.refresh(decision)
 
     return decision
+
+def get_outcome_for_decision(
+    db: Session,
+    decision_id: int,
+) -> Optional[OptimizationOutcome]:
+
+    return (
+        db.query(OptimizationOutcome)
+        .filter(
+            OptimizationOutcome.decision_id
+            == decision_id
+        )
+        .first()
+    )
+
+
+def get_outcome(
+    db: Session,
+    outcome_id: int,
+) -> Optional[OptimizationOutcome]:
+
+    return (
+        db.query(OptimizationOutcome)
+        .filter(
+            OptimizationOutcome.outcome_id
+            == outcome_id
+        )
+        .first()
+    )
+
+
+def insert_optimization_outcome(
+    db: Session,
+    *,
+    decision_id: int,
+    actual_intervention_cost: float,
+    actual_time_days: float,
+    actual_delayed: bool,
+    actual_delay_cost: float = 0.0,
+    outcome_note: Optional[str] = None,
+) -> OptimizationOutcome:
+
+    actual_total_cost = (
+        actual_intervention_cost
+        + actual_delay_cost
+    )
+
+    outcome = OptimizationOutcome(
+        decision_id=decision_id,
+        actual_intervention_cost=(
+            actual_intervention_cost
+        ),
+        actual_time_days=actual_time_days,
+        actual_delayed=actual_delayed,
+        actual_delay_cost=actual_delay_cost,
+        actual_total_cost=actual_total_cost,
+        outcome_note=outcome_note,
+    )
+
+    db.add(outcome)
+    db.commit()
+    db.refresh(outcome)
+
+    return outcome

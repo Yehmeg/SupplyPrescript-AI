@@ -47,6 +47,12 @@ from app.api.schemas.decision import (
     RecommendationDecisionRequest,
     RecommendationDecisionResponse,
 )
+
+from app.api.schemas.outcome import (
+    OptimizationOutcomeRequest,
+    OptimizationOutcomeResponse,
+    OutcomeROIResponse,
+)
 # ============================================================
 # APPLICATION LIFESPAN
 # ============================================================
@@ -924,6 +930,282 @@ def create_app() -> FastAPI:
                     f"{str(e)}"
                 ),
             )
+    # ========================================================
+    # RECORD ACTUAL OUTCOME
+    # ========================================================
+
+    @app.post(
+        f"{settings.API_PREFIX}/decisions/"
+        "{decision_id}/outcome",
+        response_model=OptimizationOutcomeResponse,
+        tags=["closed-loop"],
+    )
+    def record_optimization_outcome(
+        decision_id: int,
+        payload: OptimizationOutcomeRequest,
+        db: Session = Depends(get_db),
+    ):
+        decision = crud.get_decision(
+            db,
+            decision_id,
+        )
+
+        if decision is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Decision not found",
+            )
+
+        if decision.execution_status != "EXECUTED":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Outcome can only be recorded "
+                    "for an executed decision"
+                ),
+            )
+
+        existing_outcome = (
+            crud.get_outcome_for_decision(
+                db,
+                decision_id,
+            )
+        )
+
+        if existing_outcome is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "An outcome already exists "
+                    "for this decision"
+                ),
+            )
+
+        try:
+            outcome = (
+                crud.insert_optimization_outcome(
+                    db,
+                    decision_id=decision_id,
+                    actual_intervention_cost=(
+                        payload.actual_intervention_cost
+                    ),
+                    actual_time_days=(
+                        payload.actual_time_days
+                    ),
+                    actual_delayed=(
+                        payload.actual_delayed
+                    ),
+                    actual_delay_cost=(
+                        payload.actual_delay_cost
+                    ),
+                    outcome_note=(
+                        payload.outcome_note
+                    ),
+                )
+            )
+
+            return outcome
+
+        except HTTPException:
+            raise
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "Failed to record outcome: "
+                    f"{str(e)}"
+                ),
+            )
+    # ========================================================
+    # OUTCOME ROI / PREDICTED VS ACTUAL
+    # ========================================================
+
+    @app.get(
+        f"{settings.API_PREFIX}/decisions/"
+        "{decision_id}/roi",
+        response_model=OutcomeROIResponse,
+        tags=["closed-loop"],
+    )
+    def get_decision_roi(
+        decision_id: int,
+        db: Session = Depends(get_db),
+    ):
+        decision = crud.get_decision(
+            db,
+            decision_id,
+        )
+
+        if decision is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Decision not found",
+            )
+
+        recommendation = crud.get_recommendation(
+            db,
+            decision.recommendation_id,
+        )
+
+        if recommendation is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Recommendation not found",
+            )
+
+        outcome = crud.get_outcome_for_decision(
+            db,
+            decision_id,
+        )
+
+        if outcome is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Outcome not found",
+            )
+
+        baseline_expected_loss = float(
+            recommendation.baseline_expected_loss
+        )
+
+        predicted_action_cost = float(
+            recommendation.action_cost
+        )
+
+        optimized_expected_cost = float(
+            recommendation.optimized_expected_cost
+        )
+
+        predicted_expected_saving = float(
+            recommendation.expected_saving
+        )
+
+        actual_intervention_cost = float(
+            outcome.actual_intervention_cost
+        )
+
+        actual_delay_cost = float(
+            outcome.actual_delay_cost
+        )
+
+        actual_total_cost = float(
+            outcome.actual_total_cost
+        )
+
+        actual_time_days = float(
+            outcome.actual_time_days
+        )
+
+        intervention_cost_variance = (
+            actual_intervention_cost
+            - predicted_action_cost
+        )
+
+        optimized_cost_variance = (
+            actual_total_cost
+            - optimized_expected_cost
+        )
+
+        realized_savings_vs_baseline = (
+            baseline_expected_loss
+            - actual_total_cost
+        )
+
+        savings_variance = (
+            realized_savings_vs_baseline
+            - predicted_expected_saving
+        )
+
+        predicted_time_days = (
+            float(recommendation.predicted_time_days)
+            if recommendation.predicted_time_days
+            is not None
+            else None
+        )
+
+        time_variance_days = (
+            actual_time_days
+            - predicted_time_days
+            if predicted_time_days is not None
+            else None
+        )
+
+        # Model-relative ROI:
+        # net modeled benefit relative to actual
+        # intervention expenditure.
+        realized_roi_percent = (
+            (
+                realized_savings_vs_baseline
+                / actual_intervention_cost
+            )
+            * 100.0
+            if actual_intervention_cost > 0
+            else None
+        )
+
+        return OutcomeROIResponse(
+            decision_id=decision.decision_id,
+            recommendation_id=(
+                recommendation.recommendation_id
+            ),
+            outcome_id=outcome.outcome_id,
+
+            selected_action=(
+                recommendation.selected_action
+            ),
+
+            baseline_expected_loss=(
+                baseline_expected_loss
+            ),
+            predicted_action_cost=(
+                predicted_action_cost
+            ),
+            optimized_expected_cost=(
+                optimized_expected_cost
+            ),
+            predicted_expected_saving=(
+                predicted_expected_saving
+            ),
+            predicted_time_days=(
+                predicted_time_days
+            ),
+
+            actual_intervention_cost=(
+                actual_intervention_cost
+            ),
+            actual_delay_cost=(
+                actual_delay_cost
+            ),
+            actual_total_cost=(
+                actual_total_cost
+            ),
+            actual_time_days=(
+                actual_time_days
+            ),
+            actual_delayed=(
+                outcome.actual_delayed
+            ),
+
+            intervention_cost_variance=(
+                intervention_cost_variance
+            ),
+            optimized_cost_variance=(
+                optimized_cost_variance
+            ),
+            realized_savings_vs_baseline=(
+                realized_savings_vs_baseline
+            ),
+            savings_variance=(
+                savings_variance
+            ),
+            time_variance_days=(
+                time_variance_days
+            ),
+            realized_roi_percent=(
+                realized_roi_percent
+            ),
+        )
+
 
     # ========================================================
     # GLOBAL VALUE ERROR HANDLER
