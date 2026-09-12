@@ -38,6 +38,9 @@ from app.api.schemas.database import (
     OrderDBResponse,
     PredictionDBResponse,
     OrderWithPredictionsResponse,
+    OptimizationRunDBResponse,
+    OptimizationRecommendationDBResponse,
+    OptimizationRunWithRecommendationsResponse,
 )
 # ============================================================
 # APPLICATION LIFESPAN
@@ -525,7 +528,87 @@ def create_app() -> FastAPI:
     # If prediction_ids are supplied, the optimization run
     # and its recommendations are persisted to PostgreSQL.
     # ========================================================
+    # ========================================================
+    # OPTIMIZATION DATABASE READS
+    # ========================================================
 
+    @app.get(
+        f"{settings.API_PREFIX}/optimization-runs/{{run_id}}",
+        response_model=OptimizationRunDBResponse,
+        tags=["database"],
+    )
+    def get_optimization_run_by_id(
+        run_id: int,
+        db: Session = Depends(get_db),
+    ):
+        run = crud.get_optimization_run(
+            db,
+            run_id,
+        )
+
+        if run is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Optimization run not found",
+            )
+
+        return run
+
+
+    @app.get(
+        f"{settings.API_PREFIX}/recommendations/{{recommendation_id}}",
+        response_model=OptimizationRecommendationDBResponse,
+        tags=["database"],
+    )
+    def get_recommendation_by_id(
+        recommendation_id: int,
+        db: Session = Depends(get_db),
+    ):
+        recommendation = crud.get_recommendation(
+            db,
+            recommendation_id,
+        )
+
+        if recommendation is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Recommendation not found",
+            )
+
+        return recommendation
+
+
+    @app.get(
+        f"{settings.API_PREFIX}/optimization-runs/{{run_id}}/recommendations",
+        response_model=OptimizationRunWithRecommendationsResponse,
+        tags=["database"],
+    )
+    def get_optimization_run_recommendations(
+        run_id: int,
+        db: Session = Depends(get_db),
+    ):
+        run = crud.get_optimization_run(
+            db,
+            run_id,
+        )
+
+        if run is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Optimization run not found",
+            )
+
+        recommendations = (
+            crud.get_recommendations_for_run(
+                db,
+                run_id,
+            )
+        )
+
+        return {
+            "run": run,
+            "recommendations": recommendations,
+        }
     @app.post(
         f"{settings.API_PREFIX}/optimize",
         response_model=OptimizeResponse,
