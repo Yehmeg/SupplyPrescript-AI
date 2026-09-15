@@ -1,471 +1,1282 @@
 # SupplyPrescript Backend
 
-> **Integrated build note (29 Aug 2026):** The backend now contains the V2 inference runtime locally under `app/ml/` and the tested PuLP optimization layer under `app/optimization/`. Copy the eight trained `.pkl` artifacts into `backend/models/` before starting the API.
+FastAPI backend for **SupplyPrescript**, an AI-powered closed-loop supply-chain prescriptive analytics platform.
 
-FastAPI backend for the **SupplyPrescript** closed-loop prescriptive analytics system. Serves ML predictions (late-delivery risk scoring) and will serve prescriptive optimization recommendations, decision write-back, and outcome capture.
+The backend provides the complete workflow from ML late-delivery prediction through mathematical optimization, operational decision execution, actual outcome recording, and ROI analysis.
+
+The current backend integrates:
+
+- FastAPI REST APIs
+- SupplyPrescript ML V2
+- XGBoost + LightGBM + CatBoost ensemble inference
+- PostgreSQL persistence
+- SQLAlchemy database access
+- PuLP/CBC prescriptive optimization
+- Recommendation decision workflow
+- Execution tracking
+- Actual outcome capture
+- Predicted-vs-actual ROI calculation
+- Automated backend tests
 
 ---
 
 ## Purpose
 
-- **Prediction API** — Score late-delivery risk for incoming orders using the V2 ensemble (XGBoost + LightGBM + CatBoost)
-- **Readiness/Health** — Kubernetes-style liveness and readiness probes
-- **Future: Optimization API** — Generate prescriptive recommendations from risk probabilities + business constraints
-- **Future: Decision/Write-Back API** — Record human approvals, push to ERP/WMS/OMS, capture outcomes for retraining
+SupplyPrescript does more than predict whether an order may arrive late.
+
+The backend supports the complete closed-loop lifecycle:
+
+```text
+Order
+  ↓
+ML Prediction
+  ↓
+Optimization
+  ↓
+Recommendation
+  ↓
+Accept / Reject
+  ↓
+Execution
+  ↓
+Actual Outcome
+  ↓
+ROI Evaluation
+```
+
+The goal is to move from **predictive analytics** to **prescriptive and closed-loop analytics**.
 
 ---
 
-## Tech Stack
+# Tech Stack
 
 | Layer | Technology |
-|-------|------------|
-| Framework | FastAPI 0.110+ (async, lifespan, dependency injection) |
-| Server | Uvicorn 0.29+ (ASGI, workers) |
-| Validation | Pydantic 2.6+ (schemas, aliases, config) |
-| Settings | Pydantic-Settings 2.2+ (env-file, case-sensitive) |
-| ML Inference | `supplyprescript` package (local editable install) — XGBoost, LightGBM, CatBoost, scikit-learn, pandas, joblib |
-| Testing | pytest 8+, pytest-asyncio, httpx (AsyncClient) |
-| Lint/Type | ruff, mypy (configured in pyproject.toml) |
+|---|---|
+| Language | Python 3.11 |
+| API Framework | FastAPI |
+| ASGI Server | Uvicorn |
+| Validation | Pydantic |
+| Configuration | Pydantic Settings |
+| ORM / Database Access | SQLAlchemy |
+| PostgreSQL Driver | psycopg |
+| Database | PostgreSQL |
+| ML Models | XGBoost, LightGBM, CatBoost |
+| Data Processing | Pandas, NumPy |
+| ML Utilities | scikit-learn, joblib |
+| Optimization | PuLP |
+| Solver | CBC |
+| Testing | pytest |
+| API Testing | FastAPI / Starlette TestClient |
 
 ---
 
-## Folder Structure
+# Backend Architecture
 
+```text
+                        FastAPI Backend
+                              |
+          ┌───────────────────┼───────────────────┐
+          |                   |                   |
+          ▼                   ▼                   ▼
+     ML Service         Optimization         Database
+          |               Service              Layer
+          |                   |                   |
+          ▼                   ▼                   ▼
+ XGBoost / LightGBM      PuLP / CBC          PostgreSQL
+      / CatBoost            Solver
+          |                   |
+          └──────────┬────────┘
+                     ▼
+             Closed-Loop Workflow
+                     |
+        ┌────────────┼─────────────┐
+        ▼            ▼             ▼
+     Decision     Execution      Outcome
+                                     |
+                                     ▼
+                                    ROI
 ```
+
+---
+
+# Core Responsibilities
+
+The backend currently handles:
+
+- API health/readiness monitoring
+- ML artifact loading
+- Order validation
+- Prediction eligibility filtering
+- Late-risk inference
+- Prediction persistence
+- Order persistence
+- Optimization execution
+- Optimization-run persistence
+- Recommendation persistence
+- Recommendation retrieval
+- Human decision capture
+- Decision execution
+- Actual outcome capture
+- ROI calculation
+- Predicted-vs-actual comparison
+
+---
+
+# Project Structure
+
+The exact internal file layout may evolve, but the backend is organized around these responsibilities:
+
+```text
 backend/
-├── pyproject.toml             # Project metadata, dependencies, pytest config
-├── requirements.txt           # Pip-compatible dependencies
-├── README.md                  # This file
+│
 ├── app/
-│   ├── __init__.py
-│   ├── main.py                # FastAPI app factory, lifespan, endpoints
-│   ├── config.py              # Settings (CORS, model dir, env)
 │   ├── api/
-│   │   ├── __init__.py
-│   │   └── schemas/
-│   │       ├── __init__.py
-│   │       └── prediction.py  # Pydantic models: OrderInput, PredictRequest, PredictionResponseItem, PredictResponse
-│   └── ml/
-│       ├── __init__.py
-│       └── service.py         # MLService: loads artifacts, calls supplyprescript.inference.predict_supplyprescript
-└── tests/
-    ├── __init__.py
-    ├── conftest.py            # Fixtures: app, async_client, sample_order (32-feature V2 schema)
-    ├── test_health.py         # /health (200), /ready (200/503)
-    └── test_predict.py        # 7 predict tests: single/multi, validation, CANCELED exclusion, request_id echo
+│   │   └── API routes / schemas
+│   │
+│   ├── db/
+│   │   ├── database configuration
+│   │   ├── initialization
+│   │   └── persistence layer
+│   │
+│   ├── ml/
+│   │   └── ML inference service
+│   │
+│   ├── optimization/
+│   │   └── PuLP/CBC optimization logic
+│   │
+│   ├── models/
+│   │   └── database models
+│   │
+│   ├── schemas/
+│   │   └── request/response schemas
+│   │
+│   ├── services/
+│   │   └── application/business services
+│   │
+│   └── main.py
+│
+├── models/
+│   └── trained ML artifacts
+│
+├── tests/
+│   ├── test_health.py
+│   ├── test_predict.py
+│   ├── test_order_prediction.py
+│   ├── test_database_reads.py
+│   ├── test_optimize_persistence.py
+│   ├── test_optimization_reads.py
+│   ├── test_decisions.py
+│   ├── test_outcomes.py
+│   └── test_roi.py
+│
+├── .env.example
+├── .gitignore
+├── pyproject.toml
+├── requirements.txt
+└── README.md
 ```
 
 ---
 
-## Setup
+# Environment Configuration
 
-### Prerequisites
-- **Python ≥ 3.10** (tested on 3.14)
-- **pip ≥ 23**
-- **ML artifacts** — `SupplyPrescript_V2/supplyprescript/artifacts/` (9 `.pkl` files) must exist
+Create:
 
-### Install Dependencies
+```text
+backend/.env
+```
 
-```bash
-cd D:\Axlero\backend
+using:
 
-# Option 1: pip (requirements.txt)
+```text
+backend/.env.example
+```
+
+The important database setting follows this format:
+
+```env
+DATABASE_URL=postgresql+psycopg://USERNAME:PASSWORD@HOST:PORT/DATABASE_NAME
+```
+
+Example development format:
+
+```env
+DATABASE_URL=postgresql+psycopg://supplyprescript_app:<PASSWORD>@localhost:5433/supplyprescript
+```
+
+Never commit the real `.env` file or database password.
+
+The local development environment currently uses PostgreSQL with the SupplyPrescript application database.
+
+---
+
+# PostgreSQL Data Model
+
+The integrated backend currently uses six primary tables.
+
+## 1. `orders`
+
+Stores persisted order requests.
+
+Typical information includes:
+
+- Order ID
+- Order status
+- Source system
+- Received timestamp
+
+The ML input is processed from the submitted order payload before prediction.
+
+---
+
+## 2. `ml_predictions`
+
+Stores ML inference results associated with persisted orders.
+
+Important information includes:
+
+- Prediction ID
+- Order ID
+- Model version
+- Late-risk probability
+- Predicted late-risk classification
+- Prediction eligibility
+- Classification threshold
+- Ensemble models used
+- Request ID
+- Creation timestamp
+
+Example:
+
+```text
+Model version:
+SupplyPrescript ML V2
+
+Late-risk probability:
+0.548798
+
+Predicted late risk:
+true
+
+Threshold:
+0.22
+```
+
+---
+
+## 3. `optimization_runs`
+
+Stores each persisted optimizer execution.
+
+Information includes:
+
+- Run ID
+- Request ID
+- Optimization status
+- Total intervention cost
+- Total expected saving
+- Creation timestamp
+
+Example status:
+
+```text
+Optimal
+```
+
+---
+
+## 4. `optimization_recommendations`
+
+Stores the action selected by the optimizer.
+
+Important fields include:
+
+- Recommendation ID
+- Run ID
+- Prediction ID
+- Shipment ID
+- Action ID
+- Selected action
+- Late-risk probability
+- Risk after intervention
+- Action cost
+- Expected saving
+- Predicted time
+- Baseline expected loss
+- Optimized expected cost
+
+---
+
+## 5. `recommendation_decisions`
+
+Stores the human/operational decision attached to a recommendation.
+
+Examples:
+
+```text
+ACCEPTED
+REJECTED
+```
+
+It also tracks execution status such as:
+
+```text
+PENDING
+EXECUTED
+```
+
+Additional information may include:
+
+- Decision ID
+- Recommendation ID
+- Decided by
+- Decision note
+- Decision timestamp
+
+---
+
+## 6. `optimization_outcomes`
+
+Stores actual operational results after an executed intervention.
+
+Information includes:
+
+- Outcome ID
+- Decision ID
+- Actual intervention cost
+- Actual time
+- Actual delayed status
+- Actual delay cost
+- Actual total cost
+- Outcome note
+
+These values are used for predicted-vs-actual comparison and ROI analysis.
+
+---
+
+# Database Initialization
+
+The current project uses the backend initialization module to create missing tables.
+
+From the backend directory:
+
+```powershell
+python -m app.db.init_db
+```
+
+The project currently does not depend on Alembic migrations for the development/demo schema.
+
+Production deployment should introduce a formal migration workflow.
+
+---
+
+# Machine Learning Integration
+
+SupplyPrescript ML V2 uses an ensemble of:
+
+- XGBoost
+- LightGBM
+- CatBoost
+
+The backend loads trained model artifacts from:
+
+```text
+backend/models/
+```
+
+---
+
+## ML Service
+
+The ML service exposes prediction logic similar to:
+
+```python
+MLService.predict(orders: List[OrderInput])
+```
+
+The service:
+
+1. Receives validated Pydantic order inputs.
+2. Converts the request into the required inference structure.
+3. Applies eligibility logic.
+4. Runs the ML ensemble.
+5. Returns probability and classification results.
+6. Allows eligible results to be persisted by the database-backed API workflow.
+
+---
+
+# ML Input
+
+The V2 inference contract requires the trained feature schema used by the SupplyPrescript models.
+
+The request contains supply-chain/order attributes such as:
+
+- Transaction type
+- Scheduled shipment days
+- Benefit per order
+- Sales/customer values
+- Category
+- Customer geography
+- Customer segment
+- Department
+- Market
+- Order geography
+- Discounts
+- Product information
+- Profit values
+- Quantity
+- Order date-derived features
+
+`Order Status` is also supported for eligibility filtering.
+
+---
+
+# Prediction Eligibility
+
+Orders with statuses such as:
+
+```text
+CANCELED
+SUSPECTED_FRAUD
+```
+
+are excluded from normal late-risk scoring.
+
+For eligible orders, the model produces:
+
+```text
+Late_Risk_Probability
+Predicted_Late_Risk
+Prediction_Eligible
+Exclusion_Reason
+```
+
+The classification threshold in the currently validated development model is approximately:
+
+```text
+0.22
+```
+
+---
+
+# Prediction Interpretation
+
+The ML model predicts:
+
+> **Probability that the order will be delivered late**
+
+It does not directly predict:
+
+> **The exact number of days the order will be delayed**
+
+Any time value shown for an intervention belongs to the optimization/action model rather than the ML late-risk classifier.
+
+---
+
+# Prescriptive Optimization
+
+SupplyPrescript uses:
+
+```text
+PuLP + CBC
+```
+
+for mathematical optimization.
+
+The optimizer evaluates available intervention actions under business constraints.
+
+---
+
+## Supported Actions
+
+| Action ID | Action |
+|---|---|
+| A0 | NO_ACTION |
+| A1 | EXPEDITE |
+| A2 | PRIORITY_HANDLING |
+| A3 | ALTERNATIVE_ROUTE |
+| A4 | ALTERNATIVE_HUB |
+
+Current development action configuration:
+
+| Action | Cost | Risk Reduction | Time Reduction |
+|---|---:|---:|---:|
+| NO_ACTION | $0 | 0% | 0 days |
+| EXPEDITE | $1,800 | 35% | 2.0 days |
+| PRIORITY_HANDLING | $900 | 20% | 1.0 day |
+| ALTERNATIVE_ROUTE | $1,400 | 28% | 1.5 days |
+| ALTERNATIVE_HUB | $2,200 | 40% | 1.0 day |
+
+---
+
+## Optimization Inputs
+
+The optimization workflow uses values such as:
+
+- Shipment ID
+- Late-risk probability
+- Late-delivery penalty
+- Baseline time
+- Intervention availability
+- Budget
+- Action capacity
+- Associated prediction ID
+
+---
+
+## Optimization Objective
+
+The optimizer attempts to select feasible interventions while respecting constraints such as:
+
+```text
+Budget
+Action capacity
+Action availability
+```
+
+It compares modeled loss and intervention cost to determine an appropriate recommendation.
+
+---
+
+# Closed-Loop Decision Workflow
+
+The backend implements:
+
+```text
+ML Prediction
+      ↓
+Optimization Run
+      ↓
+Recommendation
+      ↓
+Accept / Reject
+      ↓
+Execute
+      ↓
+Record Outcome
+      ↓
+Calculate ROI
+```
+
+---
+
+# FastAPI Endpoints
+
+## Health
+
+### `GET /health`
+
+Liveness endpoint.
+
+Example:
+
+```http
+GET /health
+```
+
+Used to verify that the FastAPI process is running.
+
+---
+
+## Readiness
+
+### `GET /ready`
+
+Checks backend/model readiness.
+
+The frontend also uses this endpoint to display:
+
+```text
+System Online
+System Offline
+Model readiness
+ML threshold
+```
+
+---
+
+# Prediction APIs
+
+## `POST /api/v1/predict`
+
+Runs ML inference without the complete database-backed order lifecycle.
+
+Useful for direct inference/testing.
+
+---
+
+## `POST /api/v1/orders/predict`
+
+Database-integrated order prediction workflow.
+
+This endpoint:
+
+```text
+Receives Order
+    ↓
+Persists Order
+    ↓
+Runs ML Prediction
+    ↓
+Persists Eligible Prediction
+    ↓
+Returns Database IDs + Prediction
+```
+
+Excluded orders may be persisted without creating an `ml_predictions` row because the prediction table requires a valid probability/classification result.
+
+---
+
+# Order / Prediction Read APIs
+
+## `GET /api/v1/orders/{order_id}`
+
+Returns persisted order metadata.
+
+---
+
+## `GET /api/v1/predictions/{prediction_id}`
+
+Returns a persisted ML prediction.
+
+---
+
+## `GET /api/v1/orders/{order_id}/predictions`
+
+Returns prediction history associated with an order.
+
+The frontend currently uses this endpoint to display the latest prediction for the configured development order.
+
+---
+
+# Optimization API
+
+## `POST /api/v1/optimize`
+
+Runs the real PuLP/CBC optimizer.
+
+The workflow can persist:
+
+```text
+optimization_runs
+optimization_recommendations
+```
+
+and associate recommendations with persisted ML predictions.
+
+---
+
+# Optimization Read APIs
+
+## `GET /api/v1/optimization-runs/{run_id}`
+
+Returns an optimization run.
+
+---
+
+## `GET /api/v1/recommendations/{recommendation_id}`
+
+Returns a persisted recommendation.
+
+---
+
+## `GET /api/v1/optimization-runs/{run_id}/recommendations`
+
+Returns:
+
+- Optimization-run information
+- Recommendations associated with that run
+
+The React frontend uses this endpoint to display the optimizer-selected intervention.
+
+---
+
+# Recommendation Decision API
+
+## `POST /api/v1/recommendations/{recommendation_id}/decision`
+
+Records a recommendation decision.
+
+Example accepted decision:
+
+```json
+{
+  "decision_status": "ACCEPTED",
+  "decided_by": "frontend-ui",
+  "decision_note": "Accepted from SupplyPrescript dashboard"
+}
+```
+
+The decision can also be rejected.
+
+---
+
+# Execution API
+
+## `POST /api/v1/decisions/{decision_id}/execute`
+
+Marks an accepted decision as executed.
+
+Typical lifecycle:
+
+```text
+ACCEPTED
+   ↓
+EXECUTED
+```
+
+---
+
+# Outcome API
+
+## `POST /api/v1/decisions/{decision_id}/outcome`
+
+Records the actual result of an executed intervention.
+
+Example payload:
+
+```json
+{
+  "actual_intervention_cost": 850.0,
+  "actual_time_days": 3.8,
+  "actual_delayed": false,
+  "actual_delay_cost": 0.0,
+  "outcome_note": "Outcome recorded for end-to-end validation"
+}
+```
+
+The development outcome used during validation was simulated test/demo data.
+
+---
+
+# ROI API
+
+## `GET /api/v1/decisions/{decision_id}/roi`
+
+Returns predicted-vs-actual metrics for a completed decision.
+
+The response can contain:
+
+- Selected action
+- Baseline expected loss
+- Predicted action cost
+- Optimized expected cost
+- Predicted expected saving
+- Predicted time
+- Actual intervention cost
+- Actual delay cost
+- Actual total cost
+- Actual time
+- Actual delayed status
+- Intervention cost variance
+- Optimized cost variance
+- Realized savings vs baseline
+- Savings variance
+- Time variance
+- Realized ROI percentage
+
+---
+
+# ROI Interpretation
+
+The backend uses:
+
+```text
+baseline_expected_loss
+```
+
+as a modeled expected/counterfactual loss.
+
+It is not an observed transaction representing what definitely would have occurred without intervention.
+
+Therefore:
+
+```text
+realized_roi_percent
+```
+
+should be interpreted as:
+
+> **Model-relative realized ROI**
+
+rather than audited accounting ROI.
+
+---
+
+# Current Persisted Development Example
+
+The development database contains a validated closed-loop chain:
+
+```text
+Order #1
+   ↓
+Prediction #1
+   ↓
+Optimization Run #1
+   ↓
+Recommendation #1
+   ↓
+Decision #1
+   ↓
+Outcome #1
+   ↓
+ROI
+```
+
+Example prediction:
+
+```text
+Order Status:
+COMPLETE
+
+Late-risk probability:
+54.8798%
+
+Threshold:
+22%
+
+Predicted late risk:
+true
+```
+
+Example optimization result:
+
+```text
+Action:
+PRIORITY_HANDLING
+
+Action ID:
+A2
+
+Action cost:
+$900.00
+
+Risk before:
+54.8798%
+
+Risk after:
+43.9038%
+
+Expected saving:
+$197.60
+
+Predicted time:
+4 days
+```
+
+The associated outcome was created for end-to-end development validation and is not real production evidence.
+
+---
+
+# Setup
+
+## Prerequisites
+
+Recommended:
+
+```text
+Python 3.11
+PostgreSQL
+pip
+```
+
+The project has been validated using Python 3.11.
+
+---
+
+## 1. Open the Backend
+
+From the repository:
+
+```powershell
+cd D:\SupplyPrescript-AI-team\SupplyPrescript-AI\backend
+```
+
+---
+
+## 2. Create Virtual Environment
+
+```powershell
+py -3.11 -m venv .venv
+```
+
+Activate:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+---
+
+## 3. Install Dependencies
+
+```powershell
 pip install -r requirements.txt
-
-# Option 2: pip with editable ML package (recommended for development)
-pip install -r requirements.txt
-pip install -e ../SupplyPrescript_V2
-```
-
-> **Note:** `requirements.txt` lists `supplyprescript` as a commented local install (line 9). Uncomment and run `pip install -e ../SupplyPrescript_V2` to use the local ML package. Otherwise the ML dependencies (xgboost, lightgbm, catboost, etc.) are installed directly.
-
-### Environment Variables (Optional)
-
-Create `.env` in `backend/` if needed:
-```ini
-APP_ENV=development
-APP_HOST=0.0.0.0
-APP_PORT=8000
-API_PREFIX=/api/v1
-SUPPLYPRESCRIPT_MODEL_DIR=../SupplyPrescript_V2/supplyprescript/artifacts
-CORS_ORIGINS=["http://localhost:5173","http://127.0.0.1:5173"]
-```
-
-Defaults are defined in `app/config.py:Settings` and work without `.env`.
-
----
-
-## Running the Server
-
-```bash
-cd D:\Axlero\backend
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-- `--reload` enables auto-reload on code changes (dev only)
-- Server starts at `http://localhost:8000`
-- Lifespan loads ML artifacts on startup (prints warning if load fails)
-
-### Verify Running Server
-
-```bash
-# Health check (liveness)
-curl http://localhost:8000/health
-# → {"status":"ok"}
-
-# Readiness check (models loaded)
-curl http://localhost:8000/ready
-# → {"status":"ready","models_loaded":["XGBoost","LightGBM","CatBoost"]}
-
-# Interactive API docs
-open http://localhost:8000/docs
-# or http://localhost:8000/redoc
 ```
 
 ---
 
-## API Endpoints
+## 4. Configure PostgreSQL
 
-### `GET /health` — Liveness Probe
-**Always returns 200** if process is running. No dependencies checked.
+Create the SupplyPrescript PostgreSQL database and application role appropriate for your environment.
 
-```json
-Response 200:
-{
-  "status": "ok"
-}
+Then configure:
+
+```text
+backend/.env
 ```
 
-### `GET /ready` — Readiness Probe
-Returns **200** if ML artifacts loaded successfully; **503** otherwise.
+Example:
 
-```json
-Response 200:
-{
-  "status": "ready",
-  "models_loaded": ["XGBoost", "LightGBM", "CatBoost"]
-}
-
-Response 503:
-{
-  "detail": "ML artifacts not loaded"
-}
+```env
+DATABASE_URL=postgresql+psycopg://supplyprescript_app:<PASSWORD>@localhost:5433/supplyprescript
 ```
 
-### `POST /api/v1/predict` — Late-Delivery Risk Scoring
-Scores one or more orders using the V2 ensemble.
-
-**Request:**
-```json
-{
-  "request_id": "optional-correlation-id",
-  "orders": [
-    {
-      "Type": "DEBIT",
-      "Days for shipment (scheduled)": 4,
-      "Benefit per order": 91.25,
-      "Sales per customer": 314.64,
-      "Category Name": "Sporting Goods",
-      "Customer City": "Caguas",
-      "Customer Country": "Puerto Rico",
-      "Customer Segment": "Consumer",
-      "Customer State": "PR",
-      "Department Name": "Fitness",
-      "Latitude": 18.2514534,
-      "Longitude": -66.03705597,
-      "Market": "Pacific Asia",
-      "Order City": "Bekasi",
-      "Order Country": "Indonesia",
-      "Order Item Discount": 13.11,
-      "Order Item Discount Rate": 0.04,
-      "Order Item Product Price": 327.75,
-      "Order Item Profit Ratio": 0.29,
-      "Order Item Quantity": 1,
-      "Sales": 327.75,
-      "Order Item Total": 314.64,
-      "Order Profit Per Order": 91.25,
-      "Order Region": "Southeast Asia",
-      "Order State": "Java Occidental",
-      "Product Category Id": 73,
-      "Product Name": "Smart watch",
-      "Product Price": 327.75,
-      "Order_Year": 2018,
-      "Order_Month": 1,
-      "Order_DayOfWeek": 2,
-      "Order_Day": 31,
-      "Order Status": "COMPLETE"
-    }
-  ]
-}
-```
-
-- All **32 features required** (exact V2 schema, see `app/api/schemas/prediction.py:OrderInput`)
-- `Order Status` optional — if `CANCELED` or `SUSPECTED_FRAUD` (case-insensitive), row is excluded from scoring
-- Field aliases match DataCo column names (spaces, parentheses)
-
-**Response 200:**
-```json
-{
-  "request_id": "optional-correlation-id",
-  "predictions": [
-    {
-      "Late_Risk_Probability": 0.287567,
-      "Predicted_Late_Risk": 1,
-      "Prediction_Eligible": true,
-      "Exclusion_Reason": null
-    }
-  ],
-  "model_version": "SupplyPrescript ML V2",
-  "threshold_used": 0.18
-}
-```
-
-**Error Responses:**
-| Status | Condition |
-|--------|-----------|
-| 400 | `orders` array empty |
-| 422 | Missing required field(s) or invalid type |
-| 500 | ML inference failure (artifacts missing, preprocessing error) |
-| 422 (ValueError) | Preprocessing validation error (e.g., missing features) |
+Use the values appropriate for your own PostgreSQL installation.
 
 ---
 
-## ML V2 Integration
+## 5. Initialize Database
 
-### Model Artifacts (Loaded at Startup)
-Located at `../SupplyPrescript_V2/supplyprescript/artifacts/` (configurable via `SUPPLYPRESCRIPT_MODEL_DIR`):
-
-| File | Purpose |
-|------|---------|
-| `final_xgboost.pkl` | XGBoost classifier (may be corrupted — graceful degradation) |
-| `final_lightgbm.pkl` | LightGBM classifier |
-| `final_catboost.pkl` | CatBoost classifier |
-| `final_features.pkl` | List of 32 feature names (exact training order) |
-| `final_categorical_features.pkl` | List of 13 categorical feature names |
-| `final_category_levels.pkl` | Dict: categorical feature → allowed categories (includes `__UNKNOWN__`) |
-| `final_threshold.pkl` | Classification threshold (float, expected 0.18) |
-| `final_ensemble_config.pkl` | Dict: models, method, weights, dropped columns |
-| `baseline_preprocessor.pkl` | Legacy preprocessor (not used by V2 ensemble; sklearn version mismatch warning) |
-
-### Inference Pipeline (`supplyprescript.inference.predict_supplyprescript`)
-1. **Eligibility filter** — Drop rows with `Order Status` ∈ {CANCELED, SUSPECTED_FRAUD}
-2. **Preprocessing** — Drop `Shipping Mode`, `Order Status`; validate 32 features present; reorder to training order; encode categoricals as `pd.Categorical` with saved levels (unseen → `__UNKNOWN__`)
-3. **Ensemble prediction** — Average `predict_proba` from available models (equal weight)
-4. **Threshold** — Apply saved threshold (0.18) → binary `Predicted_Late_Risk`
-5. **Output** — DataFrame with `Late_Risk_Probability`, `Predicted_Late_Risk`, `Prediction_Eligible`, `Exclusion_Reason`
-
-### Backend Integration (`app/ml/service.py:MLService`)
-- Singleton `MLService` loads artifacts once via `get_artifacts(model_dir)`
-- `predict(orders: List[OrderInput])` → converts to DataFrame, calls `predict_supplyprescript`, maps result to `PredictionResponseItem` list
-- `is_ready()` → checks artifacts loaded and ≥1 model available
-
----
-
-## Testing
-
-```bash
-cd D:\Axlero\backend
-python -m pytest tests/ -v
+```powershell
+python -m app.db.init_db
 ```
 
-### Test Suite (9 tests, all passing)
-| Test File | Tests | Coverage |
-|-----------|-------|----------|
-| `test_health.py` | 2 | `/health` (200), `/ready` (200 or 503) |
-| `test_predict.py` | 7 | Single/multi predict, empty orders (400), missing field (422), CANCELED exclusion, case-insensitive status, request_id echo |
-
-### Test Fixtures (`conftest.py`)
-- `app` — `create_app()` session-scoped
-- `async_client` — `AsyncClient(ASGITransport(app), base_url="http://test")`
-- `sample_order` — Valid 32-feature order dict (matches V2 schema exactly)
+This creates missing tables required by the application.
 
 ---
 
-## Current Backend Status
+## 6. Start FastAPI
+
+```powershell
+uvicorn app.main:app --reload
+```
+
+Default API:
+
+```text
+http://127.0.0.1:8000
+```
+
+Interactive Swagger documentation:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+ReDoc:
+
+```text
+http://127.0.0.1:8000/redoc
+```
+
+---
+
+# Frontend CORS
+
+The development backend permits the React/Vite frontend origins used locally, including:
+
+```text
+http://localhost:5173
+http://127.0.0.1:5173
+```
+
+Production deployments should use explicit production origins rather than broad CORS rules.
+
+---
+
+# Testing
+
+Run the complete backend test suite from:
+
+```text
+backend/
+```
+
+using:
+
+```powershell
+pytest -q
+```
+
+Latest validated result:
+
+```text
+46 passed, 34 warnings
+```
+
+The warnings are currently non-blocking dependency/deprecation warnings related primarily to testing/client libraries and PuLP behavior.
+
+---
+
+# Test Coverage Areas
+
+The backend test suite currently covers major areas including:
+
+| Test Area | Purpose |
+|---|---|
+| Health / Readiness | API process and ML readiness |
+| Prediction | ML inference and validation |
+| Order Prediction | Database-backed prediction workflow |
+| Database Reads | Order/prediction retrieval |
+| Optimization Persistence | Persisted PuLP results |
+| Optimization Reads | Run/recommendation retrieval |
+| Decisions | Accept/reject workflow |
+| Outcomes | Actual outcome persistence |
+| ROI | Predicted-vs-actual ROI calculation |
+
+Current test files include:
+
+```text
+test_health.py
+test_predict.py
+test_order_prediction.py
+test_database_reads.py
+test_optimize_persistence.py
+test_optimization_reads.py
+test_decisions.py
+test_outcomes.py
+test_roi.py
+```
+
+---
+
+# Current Backend Status
 
 | Component | Status |
-|-----------|--------|
-| **FastAPI App** | ✅ Complete — lifespan, CORS, error handlers |
-| **Health Endpoints** | ✅ Complete — `/health`, `/ready` |
-| **Predict Endpoint** | ✅ Complete — validation, ML integration, 32-feature schema |
-| **ML Service** | ✅ Complete — artifact loading, ensemble inference, eligibility |
-| **Pydantic Schemas** | ✅ Complete — request/response with aliases |
-| **Configuration** | ✅ Complete — env-file, CORS, model dir |
-| **Unit Tests** | ✅ Complete — 9/9 passing |
-| **Lint/Type Config** | ✅ Complete — ruff, mypy in pyproject.toml |
-| **Database Layer** | ❌ **Pending** — no SQLAlchemy, no models, no migrations |
-| **Optimization Layer** | ❌ **Pending** — no SciPy solver, no recommendation generation |
-| **Decision/Write-Back API** | ❌ **Pending** — no approve/override/writeback endpoints |
-| **Outcome Capture** | ❌ **Pending** — no outcome ingestion endpoint |
-| **Authentication** | ❌ Not implemented (AUTH_ENABLED=False in config) |
-| **Observability** | ❌ No structured logging, metrics, tracing |
+|---|---|
+| FastAPI Application | ✅ Complete |
+| Health Endpoint | ✅ Complete |
+| Readiness Endpoint | ✅ Complete |
+| ML V2 Integration | ✅ Complete |
+| XGBoost | ✅ Integrated |
+| LightGBM | ✅ Integrated |
+| CatBoost | ✅ Integrated |
+| Prediction API | ✅ Complete |
+| Order Persistence | ✅ Complete |
+| Prediction Persistence | ✅ Complete |
+| PostgreSQL Integration | ✅ Complete |
+| Database Read APIs | ✅ Complete |
+| PuLP/CBC Optimizer | ✅ Complete |
+| Optimization Persistence | ✅ Complete |
+| Recommendation Read APIs | ✅ Complete |
+| Recommendation Accept/Reject | ✅ Complete |
+| Decision Execution | ✅ Complete |
+| Outcome Capture | ✅ Complete |
+| ROI Calculation | ✅ Complete |
+| Backend Automated Tests | ✅ 46 Passing |
+| Authentication | ❌ Not implemented |
+| Authorization / RBAC | ❌ Not implemented |
+| General Decision History Endpoint | ⚠️ Future enhancement |
+| Alembic Migration Workflow | ❌ Not implemented |
+| Production Monitoring | ❌ Not implemented |
+| CI/CD | ❌ Not configured |
 
 ---
 
-## Database Integration (Pending)
+# Current Read-API Limitation
 
-### Required for Phase 2+
-Per `../README.md` (Sections 5.1, 10, 12) and `../SupplyPrescript_README.md`, the database must store:
+The backend currently exposes the individual decision lifecycle operations required for the project but does not provide a general endpoint such as:
 
-| Entity | Purpose |
-|--------|---------|
-| `orders` | Raw input orders (32 features + metadata) |
-| `ml_predictions` | Model outputs (probability, binary risk, eligibility, threshold, model version) |
-| `optimization_runs` | Solver cycles (config snapshot, solver status, timestamps) |
-| `recommendations` | Prescriptive options per order (action, cost, net benefit, constraints, rationale) |
-| `decisions` | Human approvals/rejections/overrides (actor, reason, timestamp) |
-| `write_backs` | ERP/WMS/OMS API calls (idempotency key, retry state, response) |
-| `outcomes` | Realized actuals (late Y/N, actual cost, intervention executed) for retraining |
-
-### Backend → DB Interface (To Be Implemented)
-```python
-# In predict endpoint (after ML inference)
-await db.create_order(order_data)
-await db.create_ml_prediction(prediction_data)
-
-# In future optimize endpoint
-run_id = await db.create_optimization_run(config_snapshot)
-for rec in recommendations:
-    await db.create_recommendation(run_id, rec)
-
-# In future approve/override endpoint
-await db.create_decision(recommendation_id, decision, reason, actor_id)
-
-# In future write-back endpoint
-await db.create_writeback(recommendation_id, system, payload, idem_key)
-await db.update_writeback_status(writeback_id, status, response)
-
-# In future outcome endpoint
-await db.create_outcome(order_id, actual_late, actual_cost, ...)
+```http
+GET /api/v1/decisions
 ```
 
-### DB → Backend Interface (To Be Implemented)
-```python
-# For Retool/React queues
-await db.get_pending_recommendations(cycle_id)
-await db.get_recommendation_detail(recommendation_id)
+It also does not currently expose a generic recommendation-to-decision read endpoint.
 
-# For retraining pipeline (Airflow)
-await db.get_training_data(lookback_days=90)
+Because of this, the React frontend keeps returned workflow references in browser `localStorage` for UI continuity.
 
-# For monitoring
-await db.get_model_performance(model_version, date_range)
+This does not replace backend persistence.
+
+The actual database records remain stored in PostgreSQL.
+
+---
+
+# Error Handling
+
+The backend provides validation/error handling across the main workflow.
+
+Examples include:
+
+- Invalid request payloads
+- Missing ML fields
+- Prediction eligibility
+- ML inference failures
+- Missing database records
+- Invalid recommendation transitions
+- Duplicate/invalid decisions
+- Optimizer errors
+- Outcome lifecycle validation
+- ROI availability validation
+
+FastAPI/Pydantic validation is also used to reject malformed API requests.
+
+---
+
+# Security
+
+The current system is intended for development, academic demonstration, and project evaluation.
+
+Do not commit:
+
+```text
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+```
+
+Never commit:
+
+- PostgreSQL passwords
+- API secrets
+- Credentials
+- Production tokens
+- Private environment configuration
+
+Use:
+
+```text
+.env.example
+```
+
+to document required configuration without exposing secrets.
+
+---
+
+# Known Limitations
+
+The current implementation is functionally complete for the project/demo scope but is not a production-hardened platform.
+
+Not yet implemented:
+
+- Authentication
+- Role-based authorization
+- Production secret management
+- General decision-history endpoint
+- Full user/audit identity management
+- Alembic migration workflow
+- Production-grade structured logging
+- Metrics/tracing
+- Container orchestration
+- CI/CD pipeline
+- Production deployment automation
+- Model drift monitoring
+- Scheduled model evaluation
+- External ERP/WMS/OMS integration
+
+---
+
+# Future Improvements
+
+Potential backend improvements include:
+
+1. Add JWT/OAuth authentication
+2. Add role-based access control
+3. Add decision-history/list APIs
+4. Add recommendation-to-decision read APIs
+5. Add outcome read/list APIs
+6. Add pagination/filtering
+7. Introduce Alembic migrations
+8. Add structured logging
+9. Add Prometheus/OpenTelemetry monitoring
+10. Add GitHub Actions CI/CD
+11. Add Docker/Docker Compose
+12. Add production PostgreSQL configuration
+13. Add multi-order optimization workflows
+14. Add model-performance monitoring
+15. Add model-drift detection
+16. Add ERP/WMS/OMS connectors
+17. Add asynchronous job processing where needed
+
+---
+
+# Related Documentation
+
+Main project documentation:
+
+```text
+../README.md
+```
+
+Frontend documentation:
+
+```text
+../frontend/README.md
+```
+
+Frontend API service:
+
+```text
+../frontend/src/services/api.js
 ```
 
 ---
 
-## Optimization Integration (Pending)
+# Final Validation
 
-### Required Endpoints (Phase 2)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/v1/optimize` | POST | Input: shipment risk + constraints → Output: ranked recommendations |
-| `/api/v1/recommendations` | GET | List pending recommendations for review queue |
-| `/api/v1/recommendations/{id}` | GET | Full detail (order, ML prediction, optimization inputs/outputs) |
-| `/api/v1/recommendations/{id}/approve` | POST | Record approval, trigger write-back |
-| `/api/v1/recommendations/{id}/override` | POST | Record override (requires `reason`), trigger write-back |
-| `/api/v1/writeback/{system}` | POST | Internal: push to ERP/WMS/OMS (idempotent, retry with backoff) |
-| `/api/v1/constraints` | GET/PUT | Business rules (budget, inventory, SLA) |
-| `/api/v1/roi` | GET | Predicted vs actual cost, outcome rates |
-| `/api/v1/outcomes` | POST | Ingest realized outcomes from source systems |
+The integrated backend has been validated through:
 
-### Optimization Inputs (Per Requirements)
-- `Risk Probability` (from ML)
-- `Intervention Cost` (per action type)
-- `Late-Delivery Penalty` (per order/SKU/customer)
-- `Available Capacity` (intervention slots per cycle)
-- `SLA Constraints` (service level target, e.g., 0.95)
+```text
+FastAPI:
+Operational
 
----
+ML Ensemble:
+XGBoost + LightGBM + CatBoost working
 
-## Frontend Integration (Pending)
+PostgreSQL:
+Persistence verified
 
-### Current Frontend (`../frontend/`)
-- React + Vite app running on `http://localhost:5173`
-- **Fully mock-driven** — no live API calls
-- CORS configured in `backend/app/config.py` for `localhost:5173`
+Optimizer:
+PuLP/CBC optimal solution verified
 
-### Integration Plan
-1. **Replace mock data** with API service layer in frontend
-2. **Connect Dashboard** → `GET /api/v1/shipments/{id}/risk` + `POST /api/v1/optimize`
-3. **Connect Decisions** → `GET /api/v1/decisions`, `POST /api/v1/decisions`
-4. **Connect Analytics** → `GET /api/v1/roi`
-5. **Connect Settings** → `GET/PUT /api/v1/constraints`
-6. **Add auth context** for `actor_id` on decisions
-7. **Add WebSocket/SSE** for real-time recommendation updates (optional)
+Closed Loop:
+Prediction
+→ Optimization
+→ Recommendation
+→ Decision
+→ Execution
+→ Outcome
+→ ROI
 
----
+Tests:
+46 passed
 
-## Development Commands
+Frontend Integration:
+Verified
 
-```bash
-# Run server with reload
-uvicorn app.main:app --reload --port 8000
-
-# Run tests
-python -m pytest tests/ -v
-
-# Run tests with coverage
-python -m pytest tests/ --cov=app --cov-report=term-missing
-
-# Lint (ruff)
-ruff check app/ tests/
-
-# Type check (mypy)
-mypy app/
-
-# Format (ruff)
-ruff format app/ tests/
+Git:
+Working tree clean
 ```
 
 ---
 
-## Related Repositories
+# Summary
 
-- **Frontend** — `../frontend/` (React + Vite, analyst/executive dashboard)
-- **ML Package** — `../SupplyPrescript_V2/supplyprescript/` (inference, preprocessing, artifacts)
-- **Documentation** — `../README.md`, `../SupplyPrescript_README.md`, `../README_ML_BRANCH.md`
-- **Team Execution Plan** — `../IceStream_SupplyPrescript_Team_Execution_Plan.docx`
+SupplyPrescript Backend implements an end-to-end transition from predictive analytics into prescriptive and closed-loop decision support.
 
----
-
-## License
-
-Proprietary — internal use only. See `../README.md` Section 17.
----
-
-## Optimization API — Integrated
-
-The tested PuLP optimization module is now exposed through:
-
-`POST /api/v1/optimize`
-
-The endpoint accepts already-scored shipment risk plus business constraints. This keeps the existing `/api/v1/predict` ML endpoint unchanged and cleanly separates prediction from prescriptive optimization.
-
-Example request:
-
-```json
-{
-  "request_id": "cycle-001",
-  "shipments": [
-    {
-      "shipment_id": "S001",
-      "late_probability": 0.407488,
-      "late_penalty": 15000,
-      "expedite_available": true,
-      "priority_available": true,
-      "route_available": true,
-      "hub_available": false
-    }
-  ],
-  "constraints": {
-    "total_budget": 10000,
-    "expedite_capacity": 1,
-    "priority_capacity": 1,
-    "route_capacity": 1,
-    "hub_capacity": 1
-  }
-}
+```text
+Supply Chain Order
+       ↓
+Feature Validation
+       ↓
+ML Risk Prediction
+       ↓
+PostgreSQL Persistence
+       ↓
+PuLP/CBC Optimization
+       ↓
+Recommended Intervention
+       ↓
+Human Decision
+       ↓
+Execution
+       ↓
+Actual Outcome
+       ↓
+ROI Evaluation
 ```
 
-The response contains solver status, total intervention cost, total expected saving, and one selected action per eligible shipment.
+The backend core is functionally complete for the current academic/demo scope.
+
+Remaining work is primarily production hardening, authentication, migrations, expanded read APIs, observability, CI/CD, and deployment.
