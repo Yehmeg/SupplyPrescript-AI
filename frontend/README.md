@@ -1,202 +1,748 @@
 # SupplyPrescript Frontend
 
-React + Vite frontend for the **SupplyPrescript** closed-loop prescriptive analytics system. This is the analyst/executive dashboard (React) complementing the Retool operations interface.
+React + Vite frontend for **SupplyPrescript**, a closed-loop prescriptive analytics system for supply-chain delay risk prediction, optimization, operational decision execution, outcome recording, and ROI analysis.
+
+The frontend is integrated with the SupplyPrescript **FastAPI backend**, **PostgreSQL database**, ML ensemble, and **PuLP/CBC optimization engine**.
+
+---
+
 
 ## Purpose
 
-Provides an interactive UI for:
-- Viewing supply-chain risk alerts and ML-driven delay predictions
-- Reviewing prescriptive optimization recommendations (cost/speed/risk trade-offs)
-- Executing decisions with audit trail (simulated write-back)
-- Analyzing decision ROI and feedback-loop metrics
-- Configuring optimization constraints (budget, inventory, delivery limits)
+The frontend provides an interactive operations dashboard for:
+
+- Viewing ML-driven late-delivery risk
+- Monitoring backend and model readiness
+- Reviewing prescriptive optimization recommendations
+- Comparing intervention cost, expected savings, time, and residual risk
+- Accepting or rejecting optimizer recommendations
+- Executing accepted decisions
+- Recording actual operational outcomes
+- Comparing predicted and actual costs
+- Viewing closed-loop ROI
+- Configuring optimizer budgets, capacities, and action availability
 
 ---
 
 ## Tech Stack
 
 | Layer | Technology |
-|-------|------------|
-| Framework | React 18.3+ (hooks, functional components) |
+|---|---|
+| Framework | React 18.3+ |
 | Build Tool | Vite 5.4+ |
-| Language | JavaScript (ESM) |
-| Styling | Plain CSS (CSS custom properties, modular files) |
-| State | React hooks (`useState`, `useMemo`, `useEffect`) + custom hooks |
-| Persistence | `localStorage` (demo only — no backend yet) |
+| Language | JavaScript / JSX |
+| Styling | Plain CSS |
+| State | React hooks |
+| API Client | Native `fetch` through `src/services/api.js` |
+| Backend | FastAPI |
+| Database | PostgreSQL |
+| ML | XGBoost + LightGBM + CatBoost ensemble |
+| Optimization | PuLP + CBC |
+| Local Persistence | `localStorage` for frontend workflow references/settings |
+
+---
+
+## Architecture
+
+```text
+                     SupplyPrescript
+
+                 ┌───────────────────┐
+                 │   React + Vite    │
+                 │     Frontend      │
+                 └─────────┬─────────┘
+                           │
+                         HTTP
+                           │
+                           ▼
+                 ┌───────────────────┐
+                 │      FastAPI      │
+                 │      Backend      │
+                 └──────┬─────┬──────┘
+                        │     │
+                ┌───────┘     └────────┐
+                ▼                      ▼
+        ┌───────────────┐      ┌───────────────┐
+        │  ML Ensemble  │      │   PuLP / CBC  │
+        │ XGB/LGBM/Cat  │      │   Optimizer   │
+        └───────┬───────┘      └───────┬───────┘
+                │                      │
+                └──────────┬───────────┘
+                           ▼
+                 ┌───────────────────┐
+                 │    PostgreSQL     │
+                 └─────────┬─────────┘
+                           │
+                           ▼
+        Decision → Execution → Outcome → ROI
+````
+
+### Architecture Flow
+
+* The React frontend communicates only with the FastAPI backend.
+* The frontend does not call the ML models or optimizer directly.
+* FastAPI uses the XGBoost, LightGBM, and CatBoost ensemble for prediction.
+* FastAPI invokes the PuLP/CBC optimizer for prescriptive recommendations.
+* Orders, predictions, optimization runs, recommendations, decisions, outcomes, and ROI data are persisted in PostgreSQL.
+* The frontend accesses the workflow through REST API endpoints.
 
 ---
 
 ## Folder Structure
 
-```
+```text
 frontend/
-├── index.html                 # Vite entry HTML
-├── package.json               # Dependencies & scripts
-├── README.md                  # This file
+├── index.html
+├── package.json
+├── package-lock.json
+├── README.md
+├── .env.example
+│
 ├── src/
-│   ├── main.jsx               # App entry, routing, state, all page components
-│   ├── data/
-│   │   └── mockData.js        # Static demo data (recommendations, history, constraints)
-│   ├── hooks/
-│   │   ├── useDecisionHistory.js  # localStorage-backed decision log
-│   │   ├── useLocalStorage.js     # Generic localStorage hook
-│   │   └── useToast.js            # Toast notification system
+│   ├── main.jsx
+│   │
+│   ├── services/
+│   │   └── api.js
+│   │
 │   ├── components/
-│   │   └── ui/                # Reusable UI primitives
+│   │   └── ui/
+│   │       ├── Accordion.jsx
+│   │       ├── Badge.jsx
 │   │       ├── Button.jsx
 │   │       ├── Card.jsx
-│   │       ├── Badge.jsx
-│   │       ├── Accordion.jsx
+│   │       ├── ErrorBoundary.jsx
 │   │       ├── Modal.jsx
 │   │       ├── Spinner.jsx
-│   │       ├── Toast.jsx
-│   │       └── ErrorBoundary.jsx
+│   │       └── Toast.jsx
+│   │
+│   ├── hooks/
+│   │   ├── useDecisionHistory.js
+│   │   ├── useLocalStorage.js
+│   │   └── useToast.js
+│   │
+│   ├── data/
+│   │   └── mockData.js
+│   │
 │   ├── utils/
-│   │   └── formatters.js      # Number/date formatting helpers
+│   │   └── formatters.js
+│   │
+│   ├── styles.css
+│   │
 │   └── styles/
-│       ├── tokens.css         # Design tokens (colors, spacing, radii)
-│       ├── base.css           # Global resets, typography
-│       ├── components.css     # Component-level styles
-│       ├── layout.css         # Grid/flex layout utilities
-│       └── legacy.css         # Back-compat utility classes
-└── dist/                      # Production build output (generated)
+│       ├── tokens.css
+│       ├── base.css
+│       ├── components.css
+│       ├── layout.css
+│       ├── legacy.css
+│       └── integration.css
+│
+├── dist/                 # Generated production build
+└── node_modules/         # Local npm dependencies
 ```
+
 
 ---
 
-## Setup
+## Environment Configuration
 
-### Prerequisites
-- **Node.js ≥ 18** (LTS recommended)
-- **npm ≥ 9** (bundled with Node)
+Use `.env.example` as the reference configuration.
 
-### Install Dependencies
-```bash
-cd D:\Axlero\frontend
+```env
+VITE_API_ROOT_URL=http://127.0.0.1:8000
+VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1
+
+VITE_DEMO_ORDER_ID=1
+VITE_DEMO_RUN_ID=1
+VITE_DEMO_DECISION_ID=1
+```
+
+The demo IDs point to the persisted end-to-end development example.
+
+If the database is reset or reseeded, these IDs may need to be changed.
+
+---
+
+## Prerequisites
+
+* Node.js 18+
+* npm
+* SupplyPrescript FastAPI backend
+* PostgreSQL
+* Backend ML model artifacts
+
+---
+
+## Installation
+
+From the repository root:
+
+```powershell
+cd frontend
 npm install
 ```
 
-### Development Server
-```bash
+---
+
+## Development Server
+
+```powershell
 npm run dev
 ```
-- Starts Vite dev server (default: `http://localhost:5173`)
-- Hot-module replacement enabled
-- Open the printed URL in browser
 
-### Production Build
-```bash
+Default frontend URL:
+
+```text
+http://localhost:5173
+```
+
+Expected backend URL:
+
+```text
+http://127.0.0.1:8000
+```
+
+---
+
+## Production Build
+
+```powershell
 npm run build
 ```
-- Outputs optimized static assets to `dist/`
-- Ready for deployment to any static host (Netlify, Vercel, S3, etc.)
 
-### Preview Production Build
-```bash
+The production build has been successfully validated using:
+
+```text
+Vite 5.4.21
+34 modules transformed
+Build successful
+```
+
+Generated files are written to:
+
+```text
+frontend/dist/
+```
+
+`dist/` is ignored by Git.
+
+---
+
+## Preview Production Build
+
+```powershell
 npm run preview
 ```
-- Serves `dist/` locally for verification
 
 ---
 
-## Current Frontend Functionality
+# Application Pages
 
-### Implemented Pages (4 tabs)
+The application currently uses React state-based page switching rather than React Router.
 
-| Page | Route | Description |
-|------|-------|-------------|
-| **Dashboard** | `/` (default) | Risk alert for shipment `MC-2048` (91% delay probability, 14-day predicted delay). Three prescriptive recommendations (Air Freight, Secondary Supplier, Delay Launch) with scores, costs, pros/cons, confidence breakdown. Execute Decision workflow with budget validation. |
-| **Decisions** | `/decisions` | Write-back log table: date, action, predicted vs actual cost, outcome (Positive/Negative), status. Data from `localStorage` via `useDecisionHistory` hook. |
-| **Analytics** | `/analytics` | ROI dashboard: decisions tracked, positive outcome rate, avg predicted vs actual cost. Bar chart comparing predicted vs actual cost per decision. Feedback loop explanation (4-step continuous learning). |
-| **Settings** | `/settings` | Optimization constraint editor: maximum emergency budget ($), minimum protected inventory (units). Constraint list showing hard limits (budget, inventory) and business priority (delivery). Save shows toast confirmation. |
+## 1. Dashboard
 
-### Shared Features
-- **Toast notifications** (success/error/info) via `useToast` hook
-- **Error boundary** wraps entire app for graceful failure display
-- **Responsive CSS** with design tokens, dark-friendly palette
-- **System status indicator** in sidebar (shows "Model v1.0 • Ready")
-- **Reset Demo** button clears `localStorage` and UI state
+The Dashboard displays live backend/database information including:
 
-### Data Flow (Demo Mode)
-All data is **static mock data** from `src/data/mockData.js`:
-- `initialRecommendations` — 3 options with full prescriptive detail
-- `initialHistory` — 3 completed decisions with predicted/actual costs
-- `shipmentData` — Single at-risk shipment (MC-2048, microchips)
-- `defaultConstraints` — Budget $20,000, inventory 250 units
-- `modelInfo` — XGBoost + SciPy, v1.0, 87% accuracy
+* Order ID
+* Order status
+* Late-risk probability
+* ML classification threshold
+* High-risk / low-risk classification
+* Optimization run status
+* Optimizer recommendation
+* Intervention cost
+* Expected saving
+* Predicted action time
+* Residual risk after action
+* Relative risk reduction
+* Decision workflow progress
+* ROI when an outcome exists
 
-Decisions "executed" on Dashboard are appended to `localStorage` via `useDecisionHistory` and immediately visible on Decisions/Analytics tabs.
+Example persisted development record:
 
----
+```text
+Order: #1
+Status: COMPLETE
 
-## Mock-Data Status
+Late Risk: 54.88%
+Threshold: 22%
 
-| Data | Source | Backend Replacement |
-|------|--------|---------------------|
-| Shipment risk alert | `mockData.js:shipmentData` | `GET /api/v1/shipments/{id}/risk` |
-| Recommendations | `mockData.js:initialRecommendations` | `POST /api/v1/optimize` (or `GET /api/v1/recommendations`) |
-| Decision history | `localStorage` (seeded from `initialHistory`) | `GET /api/v1/decisions` |
-| ROI metrics | Computed from `localStorage` history | `GET /api/v1/roi` |
-| Constraints | `mockData.js:defaultConstraints` + `localStorage` | `GET/PUT /api/v1/constraints` |
-| Model info | `mockData.js:modelInfo` | `GET /api/v1/model/info` |
+Recommendation: PRIORITY_HANDLING
+Action ID: A2
+Intervention Cost: $900.00
+Predicted Time: 4 days
+Risk After Intervention: 43.90%
+Expected Saving: $197.60
+```
 
-**No live API calls exist yet.** All network requests would fail; the UI is fully functional offline.
+The optimizer is correctly displayed as:
 
----
-
-## Future Backend Integration
-
-### Required Backend Endpoints (Not Yet Implemented)
-
-| Frontend Action | Backend Endpoint | Method | Notes |
-|-----------------|------------------|--------|-------|
-| Load shipment risk | `/api/v1/shipments/{shipment_id}/risk` | GET | Returns delay probability, risk factors, financial exposure |
-| Get recommendations | `/api/v1/optimize` | POST | Body: `{ shipment_id, constraints }` → returns ranked options |
-| Execute decision | `/api/v1/decisions` | POST | Body: `{ recommendation_id, actor_id, override_reason? }` |
-| List decisions | `/api/v1/decisions` | GET | Query: `cycle_id`, `status`, pagination |
-| Get ROI analytics | `/api/v1/roi` | GET | Query: `date_range`, `group_by` |
-| Get/set constraints | `/api/v1/constraints` | GET/PUT | Budget, inventory, delivery limits |
-| Model metadata | `/api/v1/model/info` | GET | Version, accuracy, last retrained |
-
-### Integration Steps
-1. Replace `mockData.js` imports with API service layer (`src/services/api.js`)
-2. Swap `useDecisionHistory` hook for server-backed data fetching (React Query / SWR recommended)
-3. Add authentication context (JWT/OAuth) for `actor_id` on decisions
-4. Connect Settings page constraints to `PUT /api/v1/constraints`
-5. Wire Dashboard "Execute" button to `POST /api/v1/decisions` with optimistic UI update
+```text
+PuLP / CBC
+```
 
 ---
 
-## Current Project Status
+## 2. Decisions
 
-| Area | Status |
-|------|--------|
-| **UI/UX** | ✅ Complete — 4 pages, responsive, accessible |
-| **Component Library** | ✅ Complete — 8 reusable UI primitives |
-| **State Management** | ✅ Complete — hooks + localStorage |
-| **Styling System** | ✅ Complete — token-based CSS |
-| **Mock Data** | ✅ Complete — realistic demo scenario |
-| **Build/Dev Tooling** | ✅ Complete — Vite, ESLint-ready |
-| **Backend API Integration** | ❌ **Not started** — all data is static |
-| **Authentication** | ❌ Not implemented |
-| **Real-time Updates** | ❌ Not implemented (WebSocket/SSE) |
-| **Automated Tests** | ❌ Not configured (Vitest/Playwright pending) |
-| **CI/CD** | ❌ Not configured |
+The Decisions page represents the closed-loop operational decision lifecycle.
 
----
+The backend persists:
 
-## Notes for Contributors
+* Recommendation decisions
+* Accept/reject status
+* Execution status
+* Actual operational outcomes
+* ROI-related information
 
-- **No TypeScript yet** — codebase is plain JavaScript (`.jsx`). Migration planned.
-- **No routing library** — page switching via `useState` in `main.jsx`. React Router can be added when page count grows.
-- **No charting library** — Analytics bars are pure CSS. Recharts/D3 integration planned for richer visualizations.
-- **Retool** — Separate operations interface (not in this repo). This React app targets analysts/executives.
-- **Design tokens** — All colors, spacing, radii in `src/styles/tokens.css`. Modify there for theming.
+Decision writes are no longer simulated.
+
+They are sent through FastAPI and stored in PostgreSQL.
+
+### Local Storage
+
+`localStorage` is still used to retain frontend workflow references because the current backend does not yet expose a general decision-history listing endpoint.
+
+It does **not** replace PostgreSQL persistence.
 
 ---
 
-## Related Repositories
+## 3. Decision ROI
 
-- **Backend API** — `../backend/` (FastAPI, XGBoost/LightGBM/CatBoost ensemble, SciPy optimization)
-- **ML Package** — `../SupplyPrescript_V2/supplyprescript/` (inference, preprocessing, artifacts)
-- **Documentation** — `../README.md`, `../SupplyPrescript_README.md`
+The Decision ROI page displays:
+
+* Number of tracked decisions
+* Completed outcomes
+* Average predicted cost
+* Average actual cost
+* Predicted vs actual cost comparison
+* Selected action
+* Realized savings
+* Time variance
+* Model-relative ROI
+
+### ROI Interpretation
+
+The baseline used by the backend is a modeled expected-loss/counterfactual baseline.
+
+Therefore, the displayed realized ROI should be interpreted as:
+
+```text
+Model-relative realized ROI
+```
+
+and not as audited financial/accounting ROI.
+
+---
+
+## 4. Constraints
+
+The Constraints page is connected to the real PuLP/CBC optimizer.
+
+Configurable values include:
+
+* Total intervention budget
+* Late-delivery penalty
+* Baseline delivery time
+* Expedite capacity
+* Priority-handling capacity
+* Alternative-route capacity
+* Alternative-hub capacity
+* Individual action availability
+
+Running:
+
+```text
+Run & Persist Optimization
+```
+
+calls the FastAPI optimizer endpoint and persists a new `optimization_runs` record and the corresponding `optimization_recommendations` record.
+
+---
+
+# Closed-Loop Workflow
+
+The implemented application workflow is:
+
+```text
+1. Predict
+      ↓
+2. Prescribe
+      ↓
+3. Accept / Reject
+      ↓
+4. Execute
+      ↓
+5. Record Outcome
+      ↓
+6. Calculate ROI
+```
+
+The Dashboard summarizes the main lifecycle as:
+
+```text
+Predict → Prescribe → Execute → Measure
+```
+
+---
+
+# Backend API Integration
+
+All frontend API communication is centralized in:
+
+```text
+src/services/api.js
+```
+
+## Health / Readiness
+
+```http
+GET /ready
+```
+
+Used for backend and ML-model readiness monitoring.
+
+---
+
+## Orders and Predictions
+
+```http
+POST /api/v1/orders/predict
+
+GET /api/v1/orders/{order_id}
+
+GET /api/v1/predictions/{prediction_id}
+
+GET /api/v1/orders/{order_id}/predictions
+```
+
+---
+
+## Optimization
+
+```http
+POST /api/v1/optimize
+
+GET /api/v1/optimization-runs/{run_id}
+
+GET /api/v1/recommendations/{recommendation_id}
+
+GET /api/v1/optimization-runs/{run_id}/recommendations
+```
+
+---
+
+## Decision Lifecycle
+
+```http
+POST /api/v1/recommendations/{recommendation_id}/decision
+
+POST /api/v1/decisions/{decision_id}/execute
+
+POST /api/v1/decisions/{decision_id}/outcome
+
+GET /api/v1/decisions/{decision_id}/roi
+```
+
+---
+
+# Machine Learning Integration
+
+SupplyPrescript ML V2 uses an ensemble of:
+
+* XGBoost
+* LightGBM
+* CatBoost
+
+Example validated persisted prediction:
+
+```text
+Late-risk probability: 0.548798
+Classification threshold: 0.22
+Predicted late risk: true
+Model version: SupplyPrescript ML V2
+```
+
+The ML model predicts:
+
+```text
+Probability of late delivery
+```
+
+It does **not** directly predict a specific number of delay days.
+
+---
+
+# Optimization Engine
+
+The prescriptive optimization layer uses:
+
+```text
+PuLP + CBC Solver
+```
+
+Supported intervention actions include:
+
+| Action ID | Action            |
+| --------- | ----------------- |
+| A0        | NO_ACTION         |
+| A1        | EXPEDITE          |
+| A2        | PRIORITY_HANDLING |
+| A3        | ALTERNATIVE_ROUTE |
+| A4        | ALTERNATIVE_HUB   |
+
+The frontend displays recommendations persisted by the actual optimizer.
+
+The original static:
+
+* Air Freight
+* Secondary Supplier
+* Delay Product Launch
+
+cards are no longer used for the integrated dashboard workflow.
+
+---
+
+# Decision Lifecycle
+
+```text
+Optimizer Recommendation
+          |
+          ├──── Reject
+          |
+          └──── Accept
+                  |
+                  ▼
+               Execute
+                  |
+                  ▼
+           Record Outcome
+                  |
+                  ▼
+             Calculate ROI
+```
+
+Decision, execution, and outcome operations are sent to FastAPI and persisted in PostgreSQL.
+
+---
+
+# Backend Read-API Limitation
+
+The current backend does not yet expose a general endpoint such as:
+
+```http
+GET /api/v1/decisions
+```
+
+or a generic endpoint for discovering the decision attached to any recommendation.
+
+Because of this, the frontend stores returned workflow references in browser `localStorage` for UI continuity.
+
+The underlying operational records remain persisted in PostgreSQL.
+
+A future enhancement should add decision/outcome list/read APIs and remove this frontend dependency.
+
+---
+
+# System Monitoring
+
+The frontend periodically calls:
+
+```http
+GET /ready
+```
+
+and shows:
+
+* System Online
+* System Offline
+* Model loaded status
+* Current ML threshold
+
+This is backend readiness polling.
+
+It is **not** WebSocket or SSE streaming.
+
+---
+
+# Error Handling
+
+The frontend includes:
+
+* API error handling
+* Toast notifications
+* React Error Boundary
+* Loading states
+* Backend-offline state
+* Empty recommendation handling
+* Budget validation
+* Optimizer execution status
+
+---
+
+# Current Validation
+
+## Backend
+
+Latest validated backend test result:
+
+```text
+46 passed, 34 warnings
+```
+
+The warnings are currently non-blocking dependency/deprecation warnings.
+
+## Frontend
+
+Production build:
+
+```powershell
+npm run build
+```
+
+Latest result:
+
+```text
+34 modules transformed
+Build successful
+```
+
+## Git
+
+The integrated repository was verified with:
+
+```text
+nothing to commit, working tree clean
+```
+
+---
+
+# Current Project Status
+
+| Area                           | Status                |
+| ------------------------------ | --------------------- |
+| UI / UX                        | ✅ Complete            |
+| Vite Production Build          | ✅ Passing             |
+| FastAPI Integration            | ✅ Complete            |
+| PostgreSQL Integration         | ✅ Complete            |
+| ML Prediction Display          | ✅ Complete            |
+| XGBoost / LightGBM / CatBoost  | ✅ Complete            |
+| PuLP / CBC Optimization        | ✅ Complete            |
+| Recommendation Display         | ✅ Complete            |
+| Accept / Reject Workflow       | ✅ Complete            |
+| Decision Execution             | ✅ Complete            |
+| Outcome Recording              | ✅ Complete            |
+| ROI Calculation / Display      | ✅ Complete            |
+| Backend Readiness Monitoring   | ✅ Complete            |
+| Authentication / Authorization | ❌ Not implemented     |
+| General Decision History API   | ⚠️ Future enhancement |
+| Frontend Automated Tests       | ❌ Not configured      |
+| WebSocket / SSE Updates        | ❌ Not implemented     |
+| CI/CD                          | ❌ Not configured      |
+
+---
+
+# Demo Data
+
+The local development database currently contains a persisted end-to-end demonstration chain:
+
+```text
+Order #1
+Prediction #1
+Optimization Run #1
+Recommendation #1
+Decision #1
+Outcome #1
+```
+
+The recorded outcome used during end-to-end validation was **simulated test/demo data**.
+
+It should not be presented as real operational production evidence.
+
+---
+
+# Git Ignore
+
+Do not commit:
+
+```text
+node_modules/
+dist/
+.env
+```
+
+Commit:
+
+```text
+.env.example
+package.json
+package-lock.json
+src/
+README.md
+```
+
+---
+
+# Contributor Notes
+
+* The frontend currently uses JavaScript/JSX rather than TypeScript.
+* React Router is not currently used.
+* The four main views are switched using React state.
+* Charts are implemented using lightweight CSS.
+* Several original reusable UI components remain available.
+* Some legacy/mock utility files remain in the source tree but are no longer the primary data source.
+* Authentication is intentionally outside the current project/demo scope.
+
+---
+
+# Related Components
+
+Backend:
+
+```text
+../backend/
+```
+
+Backend documentation:
+
+```text
+../backend/README.md
+```
+
+Main repository documentation:
+
+```text
+../README.md
+```
+
+---
+
+# Summary
+
+SupplyPrescript has progressed from an offline mock frontend into an integrated closed-loop prescriptive analytics application:
+
+```text
+React
+   ↓
+FastAPI
+   ↓
+ML Ensemble
+   ↓
+PuLP / CBC
+   ↓
+PostgreSQL
+   ↓
+Decision
+   ↓
+Execution
+   ↓
+Outcome
+   ↓
+ROI
+```
+
+The frontend implementation is functionally complete for the current project/demo scope.
+
+Remaining work is primarily production hardening, authentication, expanded backend read APIs, frontend test automation, CI/CD, and deployment.
+
+````
