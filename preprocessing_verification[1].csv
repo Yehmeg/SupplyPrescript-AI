@@ -1,0 +1,6 @@
+Check,Status
+No missing values,PASS
+No duplicate rows,PASS
+No infinite values,PASS
+No identified leakage columns,PASS
+Target exists,PASS
