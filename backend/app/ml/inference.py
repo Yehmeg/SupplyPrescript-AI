@@ -122,8 +122,8 @@ def predict_supplyprescript(
 
     if eligible_mask.any():
         features = prepare_inference_features(new_data.loc[eligible_mask].copy(), artifacts)
-        print("DEBUG Order City:", features["Order City"].tolist())
-        print("DEBUG Product Name:", features["Product Name"].tolist())
+        # print("DEBUG Order City:", features["Order City"].tolist())
+        # print("DEBUG Product Name:", features["Product Name"].tolist())
         p_xgb = artifacts["xgb"].predict_proba(features)[:, 1]
         p_lgb = artifacts["lgb"].predict_proba(features)[:, 1]
         p_cat = artifacts["cat"].predict_proba(features)[:, 1]
